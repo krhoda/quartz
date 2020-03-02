@@ -6,41 +6,88 @@ pub type Guard = Arc<(Mutex<bool>, Condvar)>;
 #[derive(Debug)]
 pub struct UsedChanErr;
 
-pub struct PiChan<T> {
-    guard: Guard,
+#[derive(Clone)]
+pub struct PiChan<T>(Arc<PiMachine<T>>);
+
+struct PiMachine<T> {
+    init: bool,
+    used: bool,
     val: Arc<Mutex<Option<T>>>,
+    send_guard: Arc<Mutex<bool>>,
+    send_wg: WaitGroup,
+    recv_guard: Arc<Mutex<bool>>,
+    recv_wg: WaitGroup,
 }
 
-// (Send, Recv) = Chan := Send(Value) -> ReplyRecv := Recv() -> (Value, ReplySender)
-// TODO: Implement fancier conversation types.
 impl<T> PiChan<T> {
-    pub fn new() -> Arc<PiChan<T>> {
-        Arc::new(PiChan::<T> {
-            guard: Arc::new((Mutex::new(false), Condvar::new())),
+    pub fn new() -> PiChan<T> {
+        let swg = WaitGroup::new();
+        let rwg = WaitGroup::new();
+
+        swg.add(1);
+        rwg.add(1);
+
+        PiChan::<T>(Arc::new(PiMachine::<T> {
+            init: true,
+            used: false,
             val: Arc::new(Mutex::new(None)),
-        })
+            send_guard: Arc::new(Mutex::new(false)),
+            send_wg: swg,
+            recv_guard: Arc::new(Mutex::new(false)),
+            recv_wg: rwg,
+        }))
+    }
+
+    pub fn is_alive(&self) -> bool {
+        self.0.init && !self.0.used
+    }
+
+    fn is_dead(&self) -> bool {
+        !self.is_alive()
     }
 
     pub fn send(&mut self, t: T) -> Result<(), UsedChanErr> {
-        let mut data = self.val.lock().unwrap();
+        // Prevent other senders, hold the lock.
+        let mut lockhold = self.0.send_guard.lock().unwrap();
+
+        // TODO: Return UsedChan here if applicable. 
+
+        // Detect Recieve.
+        self.0.recv_wg.wait();
+
+        // Block next Sender Recieve. (Remove After Used Implementation)
+        self.0.recv_wg.add(1);
+
+        // finally.
+        let mut data = self.0.val.lock().unwrap();
         *data = Some(t);
 
-        let (m, c) = self.guard.as_ref();
-        let used = *m.lock().unwrap();
-        if used {
-            Err(UsedChanErr)
-        } else {
-            *m.lock().unwrap() = true;
-            c.notify_one();
-            Ok(())
-        }
+        // Inform recieve we exist
+        self.0.send_wg.done(); 
+
+        *lockhold = true; // Hold the lock until now.
+        // Weaken references to self?
+        // If so, one here.
+        Ok(())
     }
 
     pub fn recv(&mut self) -> Option<T> {
-        let (m, c) = self.guard.as_ref();
+        let mut lockhold = self.0.recv_guard.lock().unwrap();
 
-        let _ok = c.wait(m.lock().unwrap()).unwrap();
-        self.val.lock().unwrap().take()
+        // TODO: Return UsedChan here if applicable. 
+
+        self.0.recv_wg.done(); // Alert the sender.
+
+        self.0.send_wg.wait(); // Await the sender.
+
+        self.0.send_wg.add(1); // Block Next Reciever.
+
+        *lockhold = true; // Hold the lock until now.
+
+        // Weaken references to self?
+        self.0.val.lock().unwrap().take()
+        // If so, one here after assigning take.
+        // Then return the assigned take.
     }
 }
 
