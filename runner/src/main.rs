@@ -1,4 +1,5 @@
-use quartz;
+use wait_group;
+use pi_chan;
 use std::thread;
 
 fn main() {
@@ -8,7 +9,7 @@ fn main() {
 }
 
 fn run_wait_group() {
-    let wg = quartz::WaitGroup::new();
+    let wg = wait_group::WaitGroup::new();
 
     for _ in 0..4 {
         wg.add(1);
@@ -26,10 +27,10 @@ fn run_wait_group() {
 }
 
 fn run_pi_chan() {
-    let mut c1 = quartz::PiChan::<usize>::new();
+    let mut c1 = pi_chan::PiChan::<usize>::new();
     let mut cI = c1.clone();
 
-    let mut c2 = quartz::PiChan::<usize>::new();
+    let mut c2 = pi_chan::PiChan::<usize>::new();
     let mut cII = c2.clone();
 
     thread::spawn(move || {

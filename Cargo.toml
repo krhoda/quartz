@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+	"pi_chan",
 	"runner",
-	"quartz",
+	"wait_group",
 ]

@@ -1,5 +1,5 @@
+use wait_group::WaitGroup;
 use std::sync::{Arc, Condvar, Mutex};
-use std::fmt;
 
 pub type Guard = Arc<(Mutex<bool>, Condvar)>;
 
@@ -24,6 +24,7 @@ impl<T> PiChan<T> {
         let swg = WaitGroup::new();
         let rwg = WaitGroup::new();
 
+        // Preparting for each thread to decrement the other's group, creating a barrier.
         swg.add(1);
         rwg.add(1);
 
@@ -38,14 +39,15 @@ impl<T> PiChan<T> {
         }))
     }
 
-    pub fn is_alive(&self) -> bool {
+    fn is_in_flight(&self) -> bool {
         self.0.init && !self.0.used
     }
 
-    fn is_dead(&self) -> bool {
-        !self.is_alive()
+    pub fn is_used(&self) -> bool {
+        !self.is_in_flight()
     }
 
+    // TODO: Optimize. Destroying channel == less locks.
     pub fn send(&mut self, t: T) -> Result<(), UsedChanErr> {
         // Prevent other senders, hold the lock.
         let mut lockhold = self.0.send_guard.lock().unwrap();
@@ -88,62 +90,5 @@ impl<T> PiChan<T> {
         self.0.val.lock().unwrap().take()
         // If so, one here after assigning take.
         // Then return the assigned take.
-    }
-}
-
-// NOTE: THIS IS LIFTED WHOLE-SALE FROM THE 
-// AMAZING ABANDONED SAFE CODE OF: 
-// https://github.com/BurntSushi/chan/blob/master/src/wait_group.rs
-#[derive(Clone)]
-pub struct WaitGroup(Arc<WaitGroupInner>);
-
-struct WaitGroupInner {
-    cond: Condvar,
-    count: Mutex<i32>,
-}
-impl WaitGroup {
-    /// Create a new wait group.
-    pub fn new() -> WaitGroup {
-        WaitGroup(Arc::new(WaitGroupInner {
-            cond: Condvar::new(),
-            count: Mutex::new(0),
-        }))
-    }
-
-    /// Add a new thread to the waitgroup.
-    ///
-    /// # Failure
-    ///
-    /// If the internal count drops below `0` as a result of calling `add`,
-    /// then this function panics.
-    pub fn add(&self, delta: i32) {
-        let mut count = self.0.count.lock().unwrap();
-        *count += delta;
-        assert!(*count >= 0);
-        self.0.cond.notify_all();
-    }
-
-    /// Mark a thread as having finished.
-    ///
-    /// (This is equivalent to calling `add(-1)`.)
-    pub fn done(&self) {
-        self.add(-1);
-    }
-
-    /// Wait until all threads have completed.
-    ///
-    /// This unblocks when the internal count is `0`.
-    pub fn wait(&self) {
-        let mut count = self.0.count.lock().unwrap();
-        while *count > 0 {
-            count = self.0.cond.wait(count).unwrap();
-        }
-    }
-}
-
-impl fmt::Debug for WaitGroup {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let count = self.0.count.lock().unwrap();
-        write!(f, "WaitGroup {{ count: {:?} }}", *count)
     }
 }
