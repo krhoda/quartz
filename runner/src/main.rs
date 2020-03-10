@@ -129,7 +129,7 @@ fn pi_chan_state() {
         pi_chan::PiChanState::Used => println!("P1 is used as expected"),
         _ => println!("P1 was in unexpected state! {}", un_init),
     }
-    h.join();
+    h.join().expect("Failed to Join Threads!");
     println!("Goodbye from thread 1");
 }
 
