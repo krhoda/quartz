@@ -8,5 +8,6 @@ edition = "2018"
 
 [dependencies]
 
+spark = { path = "../spark" }
 pi_chan = { path = "../pi_chan" }
 wait_group = { path = "../wait_group" }

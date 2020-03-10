@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+	"spark",
 	"pi_chan",
 	"runner",
 	"wait_group",

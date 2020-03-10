@@ -1,5 +1,9 @@
-use wait_group;
 use pi_chan;
+
+// IN PROGRESS.
+// use spark;
+
+use wait_group;
 use std::thread;
 
 fn main() {
@@ -28,23 +32,23 @@ fn run_wait_group() {
 
 fn run_pi_chan() {
     let mut c1 = pi_chan::PiChan::<usize>::new();
-    let mut cI = c1.clone();
+    let mut c_i = c1.clone();
 
     let mut c2 = pi_chan::PiChan::<usize>::new();
-    let mut cII = c2.clone();
+    let mut c_ii = c2.clone();
 
     thread::spawn(move || {
         println!("Hello, from Thread 2!");
         let z: usize = 8;
-        let x = cI.recv();
+        let x = c_i.recv();
         match x {
             Some(y) => {
                 println!("Thread 2: Heard {}", y);
-                cII.send(z).expect("Send on used channel for c2?");
+                c_ii.send(z).expect("Send on used channel for c2?");
             }
             None => {
                 println!("Thread 2: Heard Err Listening to c1");
-                cII.send(z).expect("Send on used channel for c2?");
+                c_ii.send(z).expect("Send on used channel for c2?");
             }
         }
     });
@@ -61,4 +65,13 @@ fn run_pi_chan() {
         }
     }
 
+}
+
+fn test_spark() {
+
+}
+
+
+fn contrived_add(x: usize, y: usize) -> usize {
+    x + y
 }
