@@ -40,7 +40,7 @@ fn run_pi_chan() {
     thread::spawn(move || {
         println!("Hello, from Thread 2!");
         let z: usize = 8;
-        let x = c_i.recv();
+        let x = c_i.recv().expect("Used Chan Err Heard");
         match x {
             Some(y) => {
                 println!("Thread 2: Heard {}", y);
@@ -55,7 +55,7 @@ fn run_pi_chan() {
 
     let a: usize = 1;
     c1.send(a).expect("Send on used channel for c1?");
-    let b = c2.recv();
+    let b = c2.recv().expect("Used Chan Err Heard");
     match b {
         Some(c) => {
             println!("Thread 1: Heard {}", c);

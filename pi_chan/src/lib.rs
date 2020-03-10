@@ -1,5 +1,5 @@
-use wait_group::WaitGroup;
 use std::sync::{Arc, Condvar, Mutex};
+use wait_group::WaitGroup;
 
 pub type Guard = Arc<(Mutex<bool>, Condvar)>;
 
@@ -50,45 +50,67 @@ impl<T> PiChan<T> {
     // TODO: Optimize. Destroying channel == less locks.
     pub fn send(&mut self, t: T) -> Result<(), UsedChanErr> {
         // Prevent other senders, hold the lock.
-        let mut lockhold = self.0.send_guard.lock().unwrap();
+        let r = self.check_send_used();
+        match r {
+            Err(x) => Err(x),
 
-        // TODO: Return UsedChan here if applicable. 
+            Ok(()) => {
+                // Detect Recieve.
+                self.0.recv_wg.wait();
 
-        // Detect Recieve.
-        self.0.recv_wg.wait();
+                // finally.
+                let mut data = self.0.val.lock().unwrap();
+                *data = Some(t);
 
-        // Block next Sender Recieve. (Remove After Used Implementation)
-        self.0.recv_wg.add(1);
+                // Inform recieve we exist
+                self.0.send_wg.done();
 
-        // finally.
-        let mut data = self.0.val.lock().unwrap();
-        *data = Some(t);
-
-        // Inform recieve we exist
-        self.0.send_wg.done(); 
-
-        *lockhold = true; // Hold the lock until now.
-        // Weaken references to self?
-        // If so, one here.
-        Ok(())
+                // Weaken references to self?
+                // If so, one here.
+                Ok(())
+            }
+        }
     }
 
-    pub fn recv(&mut self) -> Option<T> {
-        let mut lockhold = self.0.recv_guard.lock().unwrap();
+    pub fn recv(&mut self) -> Result<Option<T>, UsedChanErr> {
+        let r = self.check_recv_used();
+        match r {
+            Err(x) => Err(x),
+            Ok(()) => {
+                self.0.recv_wg.done(); // Alert the sender.
 
-        // TODO: Return UsedChan here if applicable. 
+                self.0.send_wg.wait(); // Await the sender.
 
-        self.0.recv_wg.done(); // Alert the sender.
+                // Weaken references to self?
+                Ok(self.0.val.lock().unwrap().take())
+                // If so, one here after assigning take.
+                // Then return the assigned take.
+            }
+        }
 
-        self.0.send_wg.wait(); // Await the sender.
+    }
 
-        self.0.send_wg.add(1); // Block Next Reciever.
+    fn check_send_used(&mut self) -> Result<(), UsedChanErr> {
+        let mut is_used = self.0.send_guard.lock().unwrap();
 
-        *lockhold = true; // Hold the lock until now.
+        match *is_used {
+            true => Err(UsedChanErr),
+            false => {
+                *is_used = true;
+                Ok(())
+            }
+        }
+    }
 
-        // Weaken references to self?
-        self.0.val.lock().unwrap().take()
-        // If so, one here after assigning take.
-        // Then return the assigned take.
+    fn check_recv_used(&mut self) -> Result<(), UsedChanErr> {
+        let mut is_used = self.0.recv_guard.lock().unwrap();
+
+        match *is_used {
+            true => Err(UsedChanErr),
+            false => {
+                *is_used = true;
+                Ok(())
+            }
+        }
     }
 }

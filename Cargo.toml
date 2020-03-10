@@ -3,6 +3,7 @@
 members = [
 	"spark",
 	"pi_chan",
+	"propagator",
 	"runner",
 	"wait_group",
 ]
