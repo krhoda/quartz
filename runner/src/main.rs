@@ -67,11 +67,7 @@ fn run_pi_chan() {
 
 }
 
-fn test_spark() {
-
-}
-
-
-fn contrived_add(x: usize, y: usize) -> usize {
-    x + y
-}
+// fn test_spark() {
+// }
+// fn contrived_add(x: usize, y: usize) -> usize {
+// }
