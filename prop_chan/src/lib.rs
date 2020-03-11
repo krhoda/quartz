@@ -1,18 +1,23 @@
 use std::error::Error;
 use std::fmt;
 use std::sync::{Arc, Barrier, Mutex};
+use wait_group::WaitGroup;
 
-// AS WITH PropChan CONSIDER FOR DEADLOCK FREEDOM:
+// AS WITH PiChan CONSIDER FOR DEADLOCK FREEDOM:
 // Breaking into sender + reciever, killing a wait if the other drops from exisitence.
 
-// This is a single-use rendezvous channel, obeying the laws of Pi Calculus.
-// Lack of additional locks makes it more performant and lower profile than
-// it's closely related cousin PropChan. Simplicity vs. Vercitility.
+// This is a single-use quasi-rendezvous channel
+// Functionally, obeyes the laws of Pi Calculus with additional propreties.
+// These properties come with the cost of (mostly uncontested) locks.
+// The sender always awaits the reciever.
+// The reciever can sample -- not block in the presence of no sender.
+// The above enables a "choice" mechanism.
+// Maybe merged with PiChan if no extra locks are required.
 #[derive(Clone)]
-pub struct PiChan<T>(Arc<PiMachine<T>>);
+pub struct PropChan<T>(Arc<PropMachine<T>>);
 
 #[derive(Debug)]
-pub enum PiChanState {
+pub enum PropChanState {
     Unintialized, // Shouldn't happen, but who knows what someone will do.
     Open,         // Neither Send or Recieve is Used.
     AwaitSend,    // A listener is waiting.
@@ -20,19 +25,21 @@ pub enum PiChanState {
     Used,         // A transfer was made.
 }
 
-impl fmt::Display for PiChanState {
+impl fmt::Display for PropChanState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            PiChanState::Unintialized => write!(f, "Uninitalized (ILLEGAL, USE PiChan::<T>::new)"),
-            PiChanState::Open => write!(f, "Open"),
-            PiChanState::AwaitSend => write!(f, "AwaitSend"),
-            PiChanState::AwaitRecv => write!(f, "AwaitRecv"),
-            PiChanState::Used => write!(f, "Used"),
+            PropChanState::Unintialized => {
+                write!(f, "Uninitalized (ILLEGAL, USE PiChan::<T>::new)")
+            }
+            PropChanState::Open => write!(f, "Open"),
+            PropChanState::AwaitSend => write!(f, "AwaitSend"),
+            PropChanState::AwaitRecv => write!(f, "AwaitRecv"),
+            PropChanState::Used => write!(f, "Used"),
         }
     }
 }
 
-struct PiMachine<T> {
+struct PropMachine<T> {
     init: Arc<Mutex<bool>>,
     val: Arc<Mutex<Option<T>>>,
     send_guard: Arc<Mutex<bool>>,
@@ -41,10 +48,11 @@ struct PiMachine<T> {
     recv_bar: Arc<Barrier>,
 }
 
-impl<T> PiChan<T> {
-    pub fn new() -> PiChan<T> {
+impl<T> PropChan<T> {
+    pub fn new() -> PropChan<T> {
         let send_barrier = Arc::new(Barrier::new(2));
         let recv_barrier = Arc::new(Barrier::new(2));
+
         // Each thread will decrement each barrier once.
         // The recv barrier is lifted by both parties.
         // The send barrier is lifted by the reciever.
@@ -55,7 +63,7 @@ impl<T> PiChan<T> {
         // If this were not rendezvous or were long lived
         // WaitGroups would be needed to "lock the door" behind you.
 
-        PiChan::<T>(Arc::new(PiMachine::<T> {
+        PropChan::<T>(Arc::new(PropMachine::<T> {
             init: Arc::new(Mutex::new(true)),
             val: Arc::new(Mutex::new(None)),
             send_guard: Arc::new(Mutex::new(false)),
@@ -65,26 +73,26 @@ impl<T> PiChan<T> {
         }))
     }
 
-    pub fn state(&self) -> PiChanState {
+    pub fn state(&self) -> PropChanState {
         match self.check_init() {
-            false => PiChanState::Unintialized,
+            false => PropChanState::Unintialized,
             _ => match self.check_send_used() {
                 true => match self.check_recv_used() {
-                    true => PiChanState::Used,
-                    _ => PiChanState::AwaitRecv,
+                    true => PropChanState::Used,
+                    _ => PropChanState::AwaitRecv,
                 },
                 _ => match self.check_recv_used() {
-                    true => PiChanState::AwaitSend,
-                    _ => PiChanState::Open,
+                    true => PropChanState::AwaitSend,
+                    _ => PropChanState::Open,
                 },
             },
         }
     }
 
-    pub fn send(&mut self, t: T) -> Result<(), PiChanError> {
+    pub fn send(&mut self, t: T) -> Result<(), PropChanError> {
         match self.check_init() {
             // We have come into the possesion of an uninitialized channel through spectacular means.
-            false => Err(PiChanError::UninitializedChanError),
+            false => Err(PropChanError::UninitializedChanError),
             true => {
                 let r = self.set_send_used();
 
@@ -112,10 +120,10 @@ impl<T> PiChan<T> {
         }
     }
 
-    pub fn recv(&mut self) -> Result<Option<T>, PiChanError> {
+    pub fn recv(&mut self) -> Result<Option<T>, PropChanError> {
         match self.check_init() {
             // We have come into the possesion of an uninitialized channel through spectacular means.
-            false => Err(PiChanError::UninitializedChanError),
+            false => Err(PropChanError::UninitializedChanError),
             true => {
                 let r = self.set_recv_used();
                 match r {
@@ -135,11 +143,42 @@ impl<T> PiChan<T> {
         }
     }
 
-    fn set_send_used(&mut self) -> Result<(), PiChanError> {
+    pub fn sample(&mut self) -> Result<(bool, Option<T>), PropChanError> {
+        match self.check_init() {
+            // We have come into the possesion of an uninitialized channel through spectacular means.
+            false => Err(PropChanError::UninitializedChanError),
+            _ => {
+                // Check if used and block other recvers.
+                let mut is_used = self.0.recv_guard.lock().unwrap();
+
+                match *is_used {
+                    true => Err(PropChanError::UsedRecvChanError),
+                    _ => {
+                        let has_sender = self.0.send_guard.lock().unwrap();
+                        match *has_sender {
+                            false => Ok((false, None)),
+                            _ => {
+                                self.0.recv_bar.wait(); // Alert the sender.
+
+                                self.0.send_bar.wait(); // Await the sender.
+
+                                // Weaken references to self?
+                                Ok((true, self.0.val.lock().unwrap().take()))
+                                // If so, one here after assigning take.
+                                // Then return the assigned take.
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn set_send_used(&mut self) -> Result<(), PropChanError> {
         let mut is_used = self.0.send_guard.lock().unwrap();
 
         match *is_used {
-            true => Err(PiChanError::UsedSendChanError),
+            true => Err(PropChanError::UsedSendChanError),
             false => {
                 *is_used = true;
                 Ok(())
@@ -147,11 +186,11 @@ impl<T> PiChan<T> {
         }
     }
 
-    fn set_recv_used(&mut self) -> Result<(), PiChanError> {
+    fn set_recv_used(&mut self) -> Result<(), PropChanError> {
         let mut is_used = self.0.recv_guard.lock().unwrap();
 
         match *is_used {
-            true => Err(PiChanError::UsedRecvChanError),
+            true => Err(PropChanError::UsedRecvChanError),
             false => {
                 *is_used = true;
                 Ok(())
@@ -173,34 +212,34 @@ impl<T> PiChan<T> {
 }
 
 #[derive(Debug)]
-pub enum PiChanError {
+pub enum PropChanError {
     UsedSendChanError,
     UsedRecvChanError,
     UninitializedChanError,
 }
 
-impl fmt::Display for PiChanError {
+impl fmt::Display for PropChanError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            PiChanError::UsedSendChanError => {
-                write!(f, "This instance of PiChan already has a sender")
+            PropChanError::UsedSendChanError => {
+                write!(f, "This instance of PropChan already has a sender")
             }
-            PiChanError::UsedRecvChanError => {
-                write!(f, "This instance of PiChan already has a reciever")
+            PropChanError::UsedRecvChanError => {
+                write!(f, "This instance of PropChan already has a reciever")
             }
-            PiChanError::UninitializedChanError => {
-                write!(f, "PiChan must be initialized to use safely")
+            PropChanError::UninitializedChanError => {
+                write!(f, "PropChan must be initialized to use safely")
             }
         }
     }
 }
 
-impl Error for PiChanError {
+impl Error for PropChanError {
     fn description(&self) -> &str {
         match self {
-            PiChanError::UsedSendChanError => "This instance of PiChan already has a sender",
-            PiChanError::UsedRecvChanError => "This instance of PiChan already has a reciever",
-            PiChanError::UninitializedChanError => "PiChan must be initialized to use safely",
+            PropChanError::UsedSendChanError => "This instance of PropChan already has a sender",
+            PropChanError::UsedRecvChanError => "This instance of PropChan already has a reciever",
+            PropChanError::UninitializedChanError => "PropChan must be initialized to use safely",
         }
     }
 
