@@ -110,7 +110,7 @@ impl<T> PropChan<T> {
             false => Err(PropChanError::UninitializedChanError),
             true => {
                 self.0.recv_wg.wait();
-                Ok(self.0.val.clone())
+                Ok(Arc::clone(&self.0.val))
             }
         }
     }
@@ -134,7 +134,7 @@ impl<T> PropChan<T> {
                         // In practice, should not block.
                         self.0.recv_wg.wait();
 
-                        Ok((true, self.0.val.clone()))
+                        Ok((true, Arc::clone(&self.0.val)))
                     }
                 }
             }

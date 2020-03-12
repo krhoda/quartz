@@ -1,4 +1,4 @@
-use pi_chan;
+use pi_chan::{PiChan, PiChanState};
 use prop_chan::PropChan;
 
 // IN PROGRESS.
@@ -34,10 +34,10 @@ fn run_wait_group() {
 }
 
 fn run_pi_chan() {
-    let mut c1 = pi_chan::PiChan::<usize>::new();
+    let mut c1 = PiChan::<usize>::new();
     let mut c_i = c1.clone();
 
-    let mut c2 = pi_chan::PiChan::<usize>::new();
+    let mut c2 = PiChan::<usize>::new();
     let mut c_ii = c2.clone();
 
     thread::spawn(move || {
@@ -70,29 +70,29 @@ fn run_pi_chan() {
 }
 
 fn pi_chan_state() {
-    let mut p1 = pi_chan::PiChan::<usize>::new();
+    let mut p1 = PiChan::<usize>::new();
     let mut q1 = p1.clone();
 
-    let mut p2 = pi_chan::PiChan::<usize>::new();
+    let mut p2 = PiChan::<usize>::new();
     let mut q2 = p2.clone();
 
     let un_init = p1.state();
     match un_init {
-        pi_chan::PiChanState::Open => println!("P1 is open as expected"),
+        PiChanState::Open => println!("P1 is open as expected"),
         _ => println!("P1 was in unexpected state! {}", un_init),
     }
 
     let un_init = p2.state();
     match un_init {
-        pi_chan::PiChanState::Open => println!("P2 is open as expected"),
+        PiChanState::Open => println!("P2 is open as expected"),
         _ => println!("P2 was in unexpected state! {}", un_init),
     }
 
     let h = thread::spawn(move || {
         let non_determ = q1.state();
         match non_determ {
-            pi_chan::PiChanState::Open => println!("Q1 is open, we are ahead of the main thread"),
-            pi_chan::PiChanState::AwaitRecv => {
+            PiChanState::Open => println!("Q1 is open, we are ahead of the main thread"),
+            PiChanState::AwaitRecv => {
                 println!("Q1 is awaiting a reciever, we are behind the main thread")
             }
             _ => println!("Q1 is in an unexpected state!, {}", non_determ),
@@ -101,14 +101,14 @@ fn pi_chan_state() {
 
         let used = q1.state();
         match used {
-            pi_chan::PiChanState::Used => println!("Q1 is used as expected"),
+            PiChanState::Used => println!("Q1 is used as expected"),
             _ => println!("Q1 was in unexpected state! {}", used),
         }
 
         let non_determ = q2.state();
         match non_determ {
-            pi_chan::PiChanState::Open => println!("Q2 is open, we are ahead of the main thread"),
-            pi_chan::PiChanState::AwaitSend => {
+            PiChanState::Open => println!("Q2 is open, we are ahead of the main thread"),
+            PiChanState::AwaitSend => {
                 println!("Q2 is awaiting a sender, we are behind the main thread")
             }
             _ => println!("Q1 is in an unexpected state!, {}", non_determ),
@@ -118,7 +118,7 @@ fn pi_chan_state() {
 
         let used = q2.state();
         match used {
-            pi_chan::PiChanState::Used => println!("Q2 is used as expected"),
+            PiChanState::Used => println!("Q2 is used as expected"),
             _ => println!("Q2 was in unexpected state! {}", used),
         }
 
@@ -130,7 +130,7 @@ fn pi_chan_state() {
 
     let used = p1.state();
     match used {
-        pi_chan::PiChanState::Used => println!("P1 is used as expected"),
+        PiChanState::Used => println!("P1 is used as expected"),
         _ => println!("P1 was in unexpected state! {}", un_init),
     }
     h.join().expect("Failed to Join Threads!");
