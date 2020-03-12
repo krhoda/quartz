@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::fmt;
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Mutex};
 use wait_group::WaitGroup;
 
 // The Theory:
@@ -118,7 +118,7 @@ impl<T> PropChan<T> {
     // Since we have relaxed Pi Calculus' rendezvous requirement, PropChan allow sampling.
     // Like recieve, but non-blocking. Instead immediately returns a tuple
     // The first element is a bool indicating if send has occured, and the second element is
-    // either a clone of the Arc<Mutex<Option<TargetValue>>>, or a wrapper around a none.
+    // Either a clone of the Arc<Mutex<Option<TargetValue>>>, or a wrapper around a none.
     pub fn sample(&mut self) -> Result<(bool, Arc<Mutex<Option<T>>>), PropChanError> {
         match self.check_init() {
             // We have come into the possession of an uninitialized channel through spectacular means.
