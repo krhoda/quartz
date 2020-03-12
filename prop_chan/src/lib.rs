@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use wait_group::WaitGroup;
 
 // The Theory:
@@ -44,7 +44,7 @@ impl fmt::Display for PropChanState {
 
 struct PropMachine<T> {
     init: Arc<Mutex<bool>>,
-    val: Arc<Mutex<Option<T>>>,
+    val: Arc<RwLock<Option<T>>>,
     send_guard: Arc<Mutex<bool>>,
     recv_wg: WaitGroup,
 }
@@ -62,7 +62,7 @@ impl<T> PropChan<T> {
 
         PropChan::<T>(Arc::new(PropMachine::<T> {
             init: Arc::new(Mutex::new(true)),
-            val: Arc::new(Mutex::new(None)),
+            val: Arc::new(RwLock::new(None)),
             send_guard: Arc::new(Mutex::new(false)),
             recv_wg: recv_wg,
         }))
@@ -90,7 +90,7 @@ impl<T> PropChan<T> {
                     Err(x) => Err(x),
 
                     Ok(()) => {
-                        let mut data = self.0.val.lock().unwrap();
+                        let mut data = self.0.val.write().unwrap();
                         *data = Some(t);
 
                         self.0.recv_wg.done();
@@ -104,7 +104,7 @@ impl<T> PropChan<T> {
         }
     }
 
-    pub fn recv(&mut self) -> Result<Arc<Mutex<Option<T>>>, PropChanError> {
+    pub fn recv(&mut self) -> Result<Arc<RwLock<Option<T>>>, PropChanError> {
         match self.check_init() {
             // We have come into the possesion of an uninitialized channel through spectacular means.
             false => Err(PropChanError::UninitializedChanError),
@@ -119,7 +119,7 @@ impl<T> PropChan<T> {
     // Like recieve, but non-blocking. Instead immediately returns a tuple
     // The first element is a bool indicating if send has occured, and the second element is
     // Either a clone of the Arc<Mutex<Option<TargetValue>>>, or a wrapper around a none.
-    pub fn sample(&mut self) -> Result<(bool, Arc<Mutex<Option<T>>>), PropChanError> {
+    pub fn sample(&mut self) -> Result<(bool, Arc<RwLock<Option<T>>>), PropChanError> {
         match self.check_init() {
             // We have come into the possession of an uninitialized channel through spectacular means.
             false => Err(PropChanError::UninitializedChanError),
@@ -128,7 +128,7 @@ impl<T> PropChan<T> {
                 let is_complete = self.0.send_guard.lock().unwrap();
 
                 match *is_complete {
-                    false => Ok((false, Arc::new(Mutex::new(None)))),
+                    false => Ok((false, Arc::new(RwLock::new(None)))),
                     _ => {
                         // We might be right alongside the sender.
                         // In practice, should not block.

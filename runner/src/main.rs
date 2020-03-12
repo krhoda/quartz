@@ -152,7 +152,7 @@ fn test_prop_chan() {
         let r = q1.recv();
         match r {
             Err(x) => println!("Oh No! Err in Q1 recieve: {}", x),
-            Ok(a) => match *a.lock().unwrap() {
+            Ok(a) => match *a.read().unwrap() {
                 None => println!("Got 'None' in Q1 recieve"),
                 Some(b) => println!("Got {} in Q1 recieve", b),
             },
@@ -162,7 +162,7 @@ fn test_prop_chan() {
         let r = q1.recv();
         match r {
             Err(x) => println!("Oh No! Err in Q1 recieve: {}", x),
-            Ok(a) => match *a.lock().unwrap() {
+            Ok(a) => match *a.read().unwrap() {
                 None => println!("Got 'None' in Q1 recieve"),
                 Some(b) => println!("Got {} in Q1 recieve", b),
             },
@@ -179,7 +179,7 @@ fn test_prop_chan() {
     let should_be_one = p1.recv();
     match should_be_one {
         Err(x) => println!("Oh No! Err in P1 recieve: {}", x),
-        Ok(a) => match *a.lock().unwrap() {
+        Ok(a) => match *a.read().unwrap() {
             None => println!("Got 'None' in P1 recieve"),
             Some(b) => println!("Got {} in P1 recieve", b),
         },
