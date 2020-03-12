@@ -1,4 +1,5 @@
 use pi_chan;
+use prop_chan::PropChan;
 
 // IN PROGRESS.
 // use spark;
@@ -11,6 +12,7 @@ fn main() {
     run_pi_chan();
     run_wait_group();
     pi_chan_state();
+    test_prop_chan();
 }
 
 fn run_wait_group() {
@@ -106,7 +108,9 @@ fn pi_chan_state() {
         let non_determ = q2.state();
         match non_determ {
             pi_chan::PiChanState::Open => println!("Q2 is open, we are ahead of the main thread"),
-            pi_chan::PiChanState::AwaitSend => println!("Q2 is awaiting a sender, we are behind the main thread"),
+            pi_chan::PiChanState::AwaitSend => {
+                println!("Q2 is awaiting a sender, we are behind the main thread")
+            }
             _ => println!("Q1 is in an unexpected state!, {}", non_determ),
         }
 
@@ -129,6 +133,59 @@ fn pi_chan_state() {
         pi_chan::PiChanState::Used => println!("P1 is used as expected"),
         _ => println!("P1 was in unexpected state! {}", un_init),
     }
+    h.join().expect("Failed to Join Threads!");
+    println!("Goodbye from thread 1");
+}
+
+fn test_prop_chan() {
+    let mut p1 = PropChan::<usize>::new();
+    let mut q1 = p1.clone();
+
+    let (intresting, _) = p1.sample().unwrap();
+    match intresting {
+        true => println!("Recieved true from sample when it should've returned false"),
+        _ => println!("Sample returned with the expected -- false -- result")
+    };
+
+
+    let h = thread::spawn(move || {
+        let r = q1.recv();
+        match r {
+            Err(x) => println!("Oh No! Err in Q1 recieve: {}", x),
+            Ok(a) => match *a.lock().unwrap() {
+                None => println!("Got 'None' in Q1 recieve"),
+                Some(b) => println!("Got {} in Q1 recieve", b),
+            },
+        };
+
+        println!("One more time from thread 2!!!");
+        let r = q1.recv();
+        match r {
+            Err(x) => println!("Oh No! Err in Q1 recieve: {}", x),
+            Ok(a) => match *a.lock().unwrap() {
+                None => println!("Got 'None' in Q1 recieve"),
+                Some(b) => println!("Got {} in Q1 recieve", b),
+            },
+        };
+    });
+
+    p1.send(1).unwrap();
+    let e = p1.send(2);
+    match e {
+        Err(x) => println!("Got expected err: {}", x),
+        Ok(_) => println!("Got unexpected success in second send!?"),
+    }
+
+    let should_be_one = p1.recv();
+    match should_be_one {
+        Err(x) => println!("Oh No! Err in P1 recieve: {}", x),
+        Ok(a) => match *a.lock().unwrap() {
+            None => println!("Got 'None' in P1 recieve"),
+            Some(b) => println!("Got {} in P1 recieve", b),
+        },
+    };
+
+    println!("Will wait for thread 2");
     h.join().expect("Failed to Join Threads!");
     println!("Goodbye from thread 1");
 }

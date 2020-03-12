@@ -10,4 +10,5 @@ edition = "2018"
 
 spark = { path = "../spark" }
 pi_chan = { path = "../pi_chan" }
+prop_chan = { path = "../prop_chan" }
 wait_group = { path = "../wait_group" }

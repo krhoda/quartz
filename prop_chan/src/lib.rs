@@ -3,38 +3,41 @@ use std::fmt;
 use std::sync::{Arc, Barrier, Mutex};
 use wait_group::WaitGroup;
 
+// The Theory:
+// In the spirit of Propegators and Lattice-Variables, the notion of a repeatable/cached future.
+// Similar to PiChan, permits only one sender.
+// Dissimilar to PiChan, this sender does not block and there can be many recievers.
+// The recievers are halted or sent away (if sampling) if the send has not yet occured.
+// Once the send has occured, an Arc<Mutex<Option<T>>> is cloned per-reciever.
+
 // AS WITH PiChan CONSIDER FOR DEADLOCK FREEDOM:
 // Breaking into sender + reciever, killing a wait if the other drops from exisitence.
 
-// This is a single-use quasi-rendezvous channel
-// Functionally, obeyes the laws of Pi Calculus with additional propreties.
-// These properties come with the cost of (mostly uncontested) locks.
-// The sender always awaits the reciever.
-// The reciever can sample -- not block in the presence of no sender.
-// The above enables a "choice" mechanism.
-// Maybe merged with PiChan if no extra locks are required.
+// Single-Sender, Multi-Consumer channel. 
+// Sender sends non-blocking.
+// Using recv a caller awaits the send event
+// Using sample a caller recieves either 
+// (false, Arc<Mutex<None>>) before the send event and
+// (true, Arc<Mutex<Some<TargetValue>>>) after the send event 
+// It is best to think of this as a future that was run once then cached.
 #[derive(Clone)]
 pub struct PropChan<T>(Arc<PropMachine<T>>);
 
 #[derive(Debug)]
 pub enum PropChanState {
     Unintialized, // Shouldn't happen, but who knows what someone will do.
-    Open,         // Neither Send or Recieve is Used.
-    AwaitSend,    // A listener is waiting.
-    AwaitRecv,    // A sender is waiting.
-    Used,         // A transfer was made.
+    Open,         // The Send has not occured.
+    Complete,     // A transfer was made, now is a place to retrieve refs.
 }
 
 impl fmt::Display for PropChanState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             PropChanState::Unintialized => {
-                write!(f, "Uninitalized (ILLEGAL, USE PiChan::<T>::new)")
+                write!(f, "Uninitalized (ILLEGAL, USE PropChan::<T>::new)")
             }
             PropChanState::Open => write!(f, "Open"),
-            PropChanState::AwaitSend => write!(f, "AwaitSend"),
-            PropChanState::AwaitRecv => write!(f, "AwaitRecv"),
-            PropChanState::Used => write!(f, "Used"),
+            PropChanState::Complete => write!(f, "Complete"),
         }
     }
 }
@@ -43,33 +46,25 @@ struct PropMachine<T> {
     init: Arc<Mutex<bool>>,
     val: Arc<Mutex<Option<T>>>,
     send_guard: Arc<Mutex<bool>>,
-    send_bar: Arc<Barrier>,
-    recv_guard: Arc<Mutex<bool>>,
-    recv_bar: Arc<Barrier>,
+    recv_wg: WaitGroup,
 }
 
 impl<T> PropChan<T> {
     pub fn new() -> PropChan<T> {
-        let send_barrier = Arc::new(Barrier::new(2));
-        let recv_barrier = Arc::new(Barrier::new(2));
+        let recv_wg = WaitGroup::new();
+        recv_wg.add(1);
 
-        // Each thread will decrement each barrier once.
-        // The recv barrier is lifted by both parties.
-        // The send barrier is lifted by the reciever.
-        // The sender places the value.
-        // The send barrier is lifted by the sender.
-        // The reciever extracts the value.
-
-        // If this were not rendezvous or were long lived
-        // WaitGroups would be needed to "lock the door" behind you.
+        // The recievers will wait on the wait group.
+        // The sender will deposit the value into val.
+        // The sender will call done on the waitgroup.
+        // The recievers gain a clone of the Arc surrounding val.
+        // No more senders are permitted, but the value is cloned freely.
 
         PropChan::<T>(Arc::new(PropMachine::<T> {
             init: Arc::new(Mutex::new(true)),
             val: Arc::new(Mutex::new(None)),
             send_guard: Arc::new(Mutex::new(false)),
-            send_bar: send_barrier,
-            recv_guard: Arc::new(Mutex::new(false)),
-            recv_bar: recv_barrier,
+            recv_wg: recv_wg,
         }))
     }
 
@@ -77,21 +72,15 @@ impl<T> PropChan<T> {
         match self.check_init() {
             false => PropChanState::Unintialized,
             _ => match self.check_send_used() {
-                true => match self.check_recv_used() {
-                    true => PropChanState::Used,
-                    _ => PropChanState::AwaitRecv,
-                },
-                _ => match self.check_recv_used() {
-                    true => PropChanState::AwaitSend,
-                    _ => PropChanState::Open,
-                },
+                false => PropChanState::Complete,
+                _ => PropChanState::Open,
             },
         }
     }
 
     pub fn send(&mut self, t: T) -> Result<(), PropChanError> {
         match self.check_init() {
-            // We have come into the possesion of an uninitialized channel through spectacular means.
+            // We have come into the possession of an uninitialized channel through spectacular means.
             false => Err(PropChanError::UninitializedChanError),
             true => {
                 let r = self.set_send_used();
@@ -101,15 +90,10 @@ impl<T> PropChan<T> {
                     Err(x) => Err(x),
 
                     Ok(()) => {
-                        // Detect Recieve.
-                        self.0.recv_bar.wait();
-
-                        // finally.
                         let mut data = self.0.val.lock().unwrap();
                         *data = Some(t);
 
-                        // Inform recieve we exist
-                        self.0.send_bar.wait();
+                        self.0.recv_wg.done();
 
                         // Weaken references to self?
                         // If so, one here.
@@ -120,54 +104,37 @@ impl<T> PropChan<T> {
         }
     }
 
-    pub fn recv(&mut self) -> Result<Option<T>, PropChanError> {
+    pub fn recv(&mut self) -> Result<Arc<Mutex<Option<T>>>, PropChanError> {
         match self.check_init() {
             // We have come into the possesion of an uninitialized channel through spectacular means.
             false => Err(PropChanError::UninitializedChanError),
             true => {
-                let r = self.set_recv_used();
-                match r {
-                    Err(x) => Err(x),
-                    Ok(()) => {
-                        self.0.recv_bar.wait(); // Alert the sender.
-
-                        self.0.send_bar.wait(); // Await the sender.
-
-                        // Weaken references to self?
-                        Ok(self.0.val.lock().unwrap().take())
-                        // If so, one here after assigning take.
-                        // Then return the assigned take.
-                    }
-                }
+                self.0.recv_wg.wait();
+                Ok(self.0.val.clone())
             }
         }
     }
 
-    pub fn sample(&mut self) -> Result<(bool, Option<T>), PropChanError> {
+    // Since we have relaxed Pi Calculus' rendezvous requirement, PropChan allow sampling.
+    // Like recieve, but non-blocking. Instead immediately returns a tuple
+    // The first element is a bool indicating if send has occured, and the second element is
+    // either a clone of the Arc<Mutex<Option<TargetValue>>>, or a wrapper around a none.
+    pub fn sample(&mut self) -> Result<(bool, Arc<Mutex<Option<T>>>), PropChanError> {
         match self.check_init() {
-            // We have come into the possesion of an uninitialized channel through spectacular means.
+            // We have come into the possession of an uninitialized channel through spectacular means.
             false => Err(PropChanError::UninitializedChanError),
             _ => {
                 // Check if used and block other recvers.
-                let mut is_used = self.0.recv_guard.lock().unwrap();
+                let is_complete = self.0.send_guard.lock().unwrap();
 
-                match *is_used {
-                    true => Err(PropChanError::UsedRecvChanError),
+                match *is_complete {
+                    false => Ok((false, Arc::new(Mutex::new(None)))),
                     _ => {
-                        let has_sender = self.0.send_guard.lock().unwrap();
-                        match *has_sender {
-                            false => Ok((false, None)),
-                            _ => {
-                                self.0.recv_bar.wait(); // Alert the sender.
+                        // We might be right alongside the sender.
+                        // In practice, should not block.
+                        self.0.recv_wg.wait();
 
-                                self.0.send_bar.wait(); // Await the sender.
-
-                                // Weaken references to self?
-                                Ok((true, self.0.val.lock().unwrap().take()))
-                                // If so, one here after assigning take.
-                                // Then return the assigned take.
-                            }
-                        }
+                        Ok((true, self.0.val.clone()))
                     }
                 }
             }
@@ -186,24 +153,8 @@ impl<T> PropChan<T> {
         }
     }
 
-    fn set_recv_used(&mut self) -> Result<(), PropChanError> {
-        let mut is_used = self.0.recv_guard.lock().unwrap();
-
-        match *is_used {
-            true => Err(PropChanError::UsedRecvChanError),
-            false => {
-                *is_used = true;
-                Ok(())
-            }
-        }
-    }
-
     fn check_send_used(&self) -> bool {
         *self.0.send_guard.lock().unwrap()
-    }
-
-    fn check_recv_used(&self) -> bool {
-        *self.0.recv_guard.lock().unwrap()
     }
 
     fn check_init(&self) -> bool {
@@ -214,7 +165,6 @@ impl<T> PropChan<T> {
 #[derive(Debug)]
 pub enum PropChanError {
     UsedSendChanError,
-    UsedRecvChanError,
     UninitializedChanError,
 }
 
@@ -224,9 +174,7 @@ impl fmt::Display for PropChanError {
             PropChanError::UsedSendChanError => {
                 write!(f, "This instance of PropChan already has a sender")
             }
-            PropChanError::UsedRecvChanError => {
-                write!(f, "This instance of PropChan already has a reciever")
-            }
+
             PropChanError::UninitializedChanError => {
                 write!(f, "PropChan must be initialized to use safely")
             }
@@ -238,7 +186,6 @@ impl Error for PropChanError {
     fn description(&self) -> &str {
         match self {
             PropChanError::UsedSendChanError => "This instance of PropChan already has a sender",
-            PropChanError::UsedRecvChanError => "This instance of PropChan already has a reciever",
             PropChanError::UninitializedChanError => "PropChan must be initialized to use safely",
         }
     }

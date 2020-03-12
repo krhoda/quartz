@@ -83,7 +83,7 @@ impl<T> PiChan<T> {
 
     pub fn send(&mut self, t: T) -> Result<(), PiChanError> {
         match self.check_init() {
-            // We have come into the possesion of an uninitialized channel through spectacular means.
+            // We have come into the possession of an uninitialized channel through spectacular means.
             false => Err(PiChanError::UninitializedChanError),
             true => {
                 let r = self.set_send_used();
@@ -114,7 +114,7 @@ impl<T> PiChan<T> {
 
     pub fn recv(&mut self) -> Result<Option<T>, PiChanError> {
         match self.check_init() {
-            // We have come into the possesion of an uninitialized channel through spectacular means.
+            // We have come into the possession of an uninitialized channel through spectacular means.
             false => Err(PiChanError::UninitializedChanError),
             true => {
                 let r = self.set_recv_used();
