@@ -2,8 +2,8 @@
 
 ### By The Power of Math and Enthusiasm, I hope to provide:
 1) SAFE Concurrency Constructs/Primatives. (So far, 0 lines of `unsafe` code and 0 library dependencies)
-2) Freedom from deadlocks. (Idea in Progress, but it boils down to process calculi using ARCs or some sort of propegator framework)
-3) Zero-Cost Abastraction Futures. (By way of Lattice Variables and Propegator Networks -- And I will settle for Low-Cost if I have to).
+2) Freedom from deadlocks. (Idea in Progress, but it boils down to process calculi using ARCs or some sort of propagator framework)
+3) Zero-Cost Abastraction Futures. (By way of Lattice Variables and Propagator Networks -- And I will settle for Low-Cost if I have to).
 4) Perpetual Motion because if we get 2 and 3, we've got to be on a roll.
 
 ### The shoulders of giants:
@@ -21,11 +21,11 @@ The exception is runner, which is a poor excuse for a test suite and will be rep
 Don't let the name intimidate you, it is a simplified `golang` channel that more closely aligns with the Rust borrow checker's line of thinking. 
 This structure, along with the definition of channel in Pi Calculus, is a single-use send, single-use recieve, rendezvous channel. Because of it's single-use principle, it is easier prevent leaks and deadlocks. The rendezvous aspect allows it to be used as a synchronizer between threads as well. The single recieve allows the passed value to be `take`n from the `Option`, making this very performant, and the channel disposable.
 
-#### PropCell -- Propegator Cell:
+#### PropCell -- Propagator Cell:
 COMING SOON!
 
-#### PropChan -- Propegator Channel
-Named because of its relationship to the work done with Propegator Networks, Lattice Variables, and Edward Kmett's Guanxi.
+#### PropChan -- Propagator Channel
+Named because of its relationship to the work done with Propagator Networks, Lattice Variables, and Edward Kmett's Guanxi.
 A powerful structure required to compose mathematically sound `non-derminisitic execution -> determinisitic result` systems is a future that can be requested more than once, but once fulfilled, will always return the same result -- which is this structure in practice. 
 
 In implementation, it resemebles a relaxed version of `PiChan`, retaining the restriction that there is only one sender and one value, but permitting multiple read-only recievers. The send and recieve is also asyncronous -- the sender deposits the value, unlocks any future (or current) reciever, blocks any future senders, and carries on. `PropChan` retains the `PiChan`'s `recv` behavior, of blocking until the send event occurs, but it permits multiple simultanious listeners.
