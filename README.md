@@ -4,7 +4,7 @@ To paraphrase Philip Wadler, some tools are invented, others are discovered. Qua
 
 It is currently a work-in-progress and much is left to be achieved.
 
-As it stands, it is a set of a la thread-safe communication mechanisms.
+As it stands, it is a set of a la carte thread-safe communication mechanisms.
 If all goes well, it might be a Rust Propagator Framework for low/zero-cost futures.
 
 ### By The Power of Math and Enthusiasm, I hope to provide:
@@ -48,7 +48,7 @@ A powerful structure required to compose mathematically sound `non-derminisitic 
 
 In implementation, it resembles a relaxed version of `PiChan`, retaining the restriction that there is only one sender and one value, but permitting multiple read-only recievers. The send and recieve is also asyncronous -- the sender deposits the value, unblocks any future (or current) reciever, dissuades any future senders, and carries on. `PropChan` retains the `PiChan`'s `recv` behavior, of blocking until the send event occurs, but it permits multiple simultanious listeners.
 
-It also features the non-blocking `sample` which returns a  boolean value indicating whether the send event has occured, and if so, the same value as if you had waited for `recv`. 
+It also features the non-blocking `sample` which returns a two element tuple: a boolean value indicating whether the send event has occured, and if so, the same value as if you had waited for `recv`, otherwise the second value is a `None`. 
 
 The value that emerges from the `PropChan`, `PropResult`, is essentially the read half of a `RwLock` surrounding the deposited value. As the only writer has already written before the first reader is able to call `read`, it should never block or contain a poison error. Still, the error is exposed through `Result` of `read` in case of freak accident. Thus the result of the async sender's operation is now thread safe, immutable, quasi-lock-less once created, and blocked until created.
 
