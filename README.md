@@ -47,6 +47,19 @@ Named because of its relationship to the work done with Propagator Networks.
 A powerful structure required to compose mathematically sound `non-derminisitic execution -> determinisitic result` systems is a future that can be requested more than once, but once fulfilled, will always return the same result -- which is this structure in practice. 
 
 In implementation, it resembles a relaxed version of `PiChan`, retaining the restriction that there is only one sender and one value, but permitting multiple read-only recievers. The send and recieve is also asyncronous -- the sender deposits the value, unblocks any future (or current) reciever, dissuades any future senders, and carries on. `PropChan` retains the `PiChan`'s `recv` behavior, of blocking until the send event occurs, but it permits multiple simultanious listeners.
+
 It also features the non-blocking `sample` which returns a  boolean value indicating whether the send event has occured, and if so, the same value as if you had waited for `recv`. 
 
 The value that emerges from the `PropChan`, `PropResult`, is essentially the read half of a `RwLock` surrounding the deposited value. As the only writer has already written before the first reader is able to call `read`, it should never block or contain a poison error. Still, the error is exposed through `Result` of `read` in case of freak accident. Thus the result of the async sender's operation is now thread safe, immutable, quasi-lock-less once created, and blocked until created.
+
+#### Spark -- NOT IMPLEMENTED
+If determined to be valuable, will resemble the concept of a spark utilized by the [Haskell runtime](https://simonmar.github.io/bib/papers/threadscope.pdf). It would be a structure that accepted a variable of type `T`, a function from types `T -> U`, and exposed a method to retrieve a `U`. 
+
+The act of creating a spark begins the execution of the function acting on the variable asyncronously. The sole attempt to retrieve the value of the spark will either block until the asynchronous function concludes and the `U` is available, or immediately return the precomputed `U`.
+
+Unlike futures offered by the standard library, execution begins with the declaration of the spark, and the function which declares the spark can continue parallel execution without interaction with the spark until calling `read`.
+
+#### WaitGroup -- Thank you BurntSushi
+Unaltered from: [this abandoned project](https://github.com/BurntSushi/chan/blob/master/src/wait_group.rs)
+
+This is the same concurrency construct (API and all) available in [Golang](https://gobyexample.com/waitgroups). It is similar to a `barrier` available in the standard library but with the act of lowering the `barrier`'s count is now separate from waiting on it. Such a thing becomes very covienent for a dynamic async batching, or async communication between (sets of) threads.
