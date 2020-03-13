@@ -17,13 +17,14 @@ If all goes well, it might be a Rust Propagator Framework for low/zero-cost futu
 Implementation and exposed API influences include: 
 * BurntSushi's archived [chan library](https://github.com/BurntSushi/chan/) (including the whole-sale copy-paste of the `wait_group` module, getting him top billing) 
 * The [Golang concurrency model](https://golang.org/ref/mem) and technique of Rob Pike's myriad of languages.
-* The Erlang distributed concurrency model, best introduced through the author of Erlang's [extremely readable PHD thesis]()
+* The Erlang distributed concurrency model, best introduced through the author of Erlang's [extremely readable PHD thesis](https://www.cs.otago.ac.nz/coursework/cosc461/armstrong_thesis_2003.pdf)
+* The Haskell concurrency model, particularly the [Par Monad](https://simonmar.github.io/bib/papers/monad-par.pdf) and in general, the work of Simon Marlow.
 
 Theoretical underpinnings of the unseen guts include:
-* The [process calculus]() of Sir Tony Hoare and [others](), including [Pi Calculus]()
-* The [various]() [works]() on [propagators as a model of computation]() of Alexey Radul and Gerrald Sussman
-* The [works]() and [libraries]() of Lindsey Kuper and Ryan Newton surrounding lattice variables (and their near cousins)
-* The [experimental library]() and [talks]() of Edward Kmett involving basically all of the above.
+* The [process calculus](http://usingcsp.com/cspbook.pdf) of Sir Tony Hoare and [others](https://www.researchgate.net/publication/220368672_A_Reflective_Higher-order_Calculus/fulltext/0ffc60670cf255165fc81be2/A-Reflective-Higher-order-Calculus.pdf), including [Pi Calculus](https://en.wikipedia.org/wiki/%CE%A0-calculus)
+* The [various](http://groups.csail.mit.edu/genesis/papers/radul%202009.pdf) [works](https://groups.csail.mit.edu/mac/users/gjs/6.945/readings/art.pdf) on [propagators](https://groups.csail.mit.edu/mac/users/gjs/propagators/revised-html.html) as a [model of computation](https://github.com/namin/propagators) of Alexey Radul and Gerrald Sussman
+* The [works](https://users.soe.ucsc.edu/~lkuper/papers/lvars-fhpc13.pdf) and [libraries](https://hackage.haskell.org/package/lvish) of Lindsey Kuper and Ryan Newton surrounding lattice variables (and their near cousins joined-semi-lattices)
+* The [experimental library](https://github.com/ekmett/guanxi) and [talks](https://www.youtube.com/watch?v=s2dknG7KryQ) of Edward Kmett involving basically all of the above.
 
 ### Structure:
 
