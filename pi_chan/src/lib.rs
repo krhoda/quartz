@@ -208,3 +208,81 @@ impl Error for PiChanError {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+
+    #[test]
+    fn test_pi_chan() {
+        let mut p1 = PiChan::<bool>::new();
+        let mut q1 = p1.clone();
+
+        let un_init = p1.state();
+        match un_init {
+            PiChanState::Open => println!(""),
+            _ => panic!("P1 was in unexpected state! {}", un_init),
+        };
+
+        let mut p2 = PiChan::<bool>::new();
+        let mut q2 = p2.clone();
+
+        let h = thread::spawn(move || {
+            let non_determ = q1.state();
+            match non_determ {
+                PiChanState::Open => println!("Q1 is open, we are ahead of the main thread"),
+                PiChanState::AwaitRecv => {
+                    println!("Q1 is awaiting a reciever, we are behind the main thread")
+                }
+                _ => panic!("Q1 is in an unexpected state!, {}", non_determ),
+            };
+
+            let q1_result = q1.recv().expect("Used Chan Err Heard");
+            match q1_result {
+                Some(y) => {
+                    assert!(y);
+                }
+                None => {
+                    panic!("Thread 2: Heard Err Listening to c1");
+                }
+            };
+
+            let used = q1.state();
+            match used {
+                PiChanState::Used => println!("Q1 is used as expected"),
+                _ => panic!("Q1 was in unexpected state! {}", used),
+            };
+
+            let non_determ = q2.state();
+            match non_determ {
+                PiChanState::Open => println!("Q2 is open, we are ahead of the main thread"),
+                PiChanState::AwaitSend => {
+                    println!("Q2 is awaiting a sender, we are behind the main thread")
+                }
+                _ => panic!("Q2 is in an unexpected state!, {}", non_determ),
+            };
+
+            q2.send(true).expect("Send on used channel for c2?");
+
+            let used = q2.state();
+            match used {
+                PiChanState::Used => println!("Q2 is used as expected"),
+                _ => panic!("Q2 was in unexpected state! {}", used),
+            };
+        });
+
+        p1.send(true).expect("Send on used channel for p1");
+        let p2_result = p2.recv().expect("Used Chan Err Heard");
+        match p2_result {
+            Some(y) => {
+                assert!(y);
+            }
+            None => {
+                panic!("Thread 2: Heard Err Listening to c1");
+            }
+        }
+
+        h.join().expect("Failed to Join Threads!");
+    }
+}

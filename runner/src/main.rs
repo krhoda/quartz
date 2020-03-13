@@ -5,33 +5,31 @@ use prop_chan::PropChan;
 // use spark;
 
 use std::thread;
-use wait_group;
 
 fn main() {
     println!("Hello, from Thread 1!");
     run_pi_chan();
-    run_wait_group();
     pi_chan_state();
     test_prop_chan();
 }
 
-fn run_wait_group() {
-    let wg = wait_group::WaitGroup::new();
+// fn run_wait_group() {
+//     let wg = wait_group::WaitGroup::new();
 
-    for _ in 0..4 {
-        wg.add(1);
-        let wg = wg.clone();
-        thread::spawn(move || {
-            // do some work.
-            println!("Hello from Thread 2!");
-            // And now call done.
-            wg.done();
-        });
-    }
+//     for _ in 0..4 {
+//         wg.add(1);
+//         let wg = wg.clone();
+//         thread::spawn(move || {
+//             // do some work.
+//             println!("Hello from Thread 2!");
+//             // And now call done.
+//             wg.done();
+//         });
+//     }
 
-    wg.wait();
-    println!("Goodbye from Thread 1!");
-}
+//     wg.wait();
+//     println!("Goodbye from Thread 1!");
+// }
 
 fn run_pi_chan() {
     let mut c1 = PiChan::<usize>::new();
