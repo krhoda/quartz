@@ -62,7 +62,6 @@ impl fmt::Debug for WaitGroup {
 
 #[cfg(test)]
 mod tests {
-    // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
     use std::thread;
     use std::sync::{Arc, Mutex};
@@ -103,11 +102,9 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
     fn test_wait_group_panic() {
-        let result = panic::catch_unwind(|| {
             let wg = WaitGroup::new();
             wg.add(-1);
-        });
-        assert!(result.is_err());
     }
 }
