@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::fmt;
-use std::sync::{Arc, Mutex, RwLock, LockResult, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, LockResult, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use wait_group::WaitGroup;
 
 // The Theory:
@@ -15,12 +15,12 @@ use wait_group::WaitGroup;
 // AS WITH PiChan CONSIDER FOR DEADLOCK FREEDOM:
 // Breaking into sender + reciever, killing a wait if the other drops from exisitence.
 
-// Single-Sender, Multi-Consumer channel. 
+// Single-Sender, Multi-Consumer channel.
 // Sender sends non-blocking.
 // Using recv a caller awaits the send event
-// Using sample a caller recieves either 
+// Using sample a caller recieves either
 // (false, Arc<Mutex<None>>) before the send event and
-// (true, Arc<Mutex<Some<TargetValue>>>) after the send event 
+// (true, Arc<Mutex<Some<TargetValue>>>) after the send event
 // It is best to think of this as a future that was run once then cached.
 #[derive(Clone)]
 pub struct PropChan<T>(Arc<PropMachine<T>>);
@@ -73,7 +73,7 @@ impl fmt::Display for PropChanState {
 
 struct PropMachine<T> {
     init: Arc<Mutex<bool>>,
-    val: Arc<Mutex<PropResult<T>>>, 
+    val: Arc<Mutex<PropResult<T>>>,
     send_guard: Arc<Mutex<bool>>,
     recv_wg: WaitGroup,
 }
@@ -102,8 +102,8 @@ impl<T> PropChan<T> {
         match self.check_init() {
             false => PropChanState::Unintialized,
             _ => match self.check_send_used() {
-                false => PropChanState::Complete,
-                _ => PropChanState::Open,
+                false => PropChanState::Open,
+                _ => PropChanState::Complete,
             },
         }
     }
@@ -227,5 +227,74 @@ impl Error for PropChanError {
 
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         None
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+
+    #[test]
+    fn test_prop_chan() {
+        let mut p1 = PropChan::<usize>::new();
+        let mut q1 = p1.clone();
+        let (intresting, _) = p1.sample().unwrap();
+        match intresting {
+            true => panic!("Recieved true from sample when it should've returned false"),
+            _ => println!("Sample returned with the expected -- false -- result"),
+        };
+
+        let open_state = p1.state();
+        match open_state {
+            PropChanState::Open => println!(""),
+            _ => println!("Unexpected state in open p1!"),
+        };
+
+        let h = thread::spawn(move || {
+            let r = q1.recv();
+            match r {
+                Err(x) => panic!("Oh No! Err in Q1 recieve: {}", x),
+                Ok(a) => match *a.read().unwrap() {
+                    None => panic!("Got 'None' in Q1 recieve"),
+                    Some(b) => println!("Got {} in Q1 recieve", b),
+                },
+            };
+
+            let complete_state = q1.state();
+            match complete_state {
+                PropChanState::Complete => println!(""),
+                _ => panic!("Unexpected state in complete q1"),
+            };
+
+            let (etre, result) = q1.sample().expect("Error In Post-Send Sample!");
+            match etre {
+                true => println!(""),
+                _ => panic!("Sample failed after send event."),
+            };
+
+            match *result.read().unwrap() {
+                None => panic!("Got 'None' in Q1 recieve"),
+                Some(b) => println!("Got {} in Q1 recieve", b),
+            };
+        });
+
+        p1.send(1).unwrap();
+        let e = p1.send(2);
+        match e {
+            Err(x) => println!("Got expected err: {}", x),
+            Ok(_) => panic!("Got unexpected success in second send!?"),
+        }
+
+        let should_be_one = p1.recv();
+        match should_be_one {
+            Err(x) => panic!("Oh No! Err in P1 recieve: {}", x),
+            Ok(a) => match *a.read().unwrap() {
+                None => panic!("Got 'None' in P1 recieve"),
+                Some(b) => println!("Got {} in P1 recieve", b),
+            },
+        };
+
+        println!("Will wait for thread 2");
+        h.join().expect("Failed to Join Threads!");
     }
 }

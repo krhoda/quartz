@@ -29,9 +29,7 @@ Theoretical underpinnings of the unseen guts include:
 ### Structure:
 
 #### Overview: 
-The subfolders in the workspace are a la carte concurrency structures. Currently, they work only in a threaded concurrency model. Futures will eventually be addressed. Mix, match, pay only for what you need.
-
-The exception is runner, which is a poor excuse for a test suite and will be replaced with proper testing shortly.
+The subfolders in the workspace are a la carte concurrency structures, complete with module level testing. Currently, they work only in a threaded concurrency model. Futures will eventually be addressed. Mix, match, pay only for what you need.
 
 The below is a simple explanation of each construct, both practically and theoretically. API/Implementation details will be provided in autogen'd docs one day soon.
 

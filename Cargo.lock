@@ -16,16 +16,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "runner"
-version = "0.1.0"
-dependencies = [
- "pi_chan 0.1.0",
- "prop_chan 0.1.0",
- "spark 0.1.0",
- "wait_group 0.1.0",
-]
-
-[[package]]
 name = "spark"
 version = "0.1.0"
 dependencies = [

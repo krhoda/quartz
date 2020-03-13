@@ -284,5 +284,17 @@ mod tests {
         }
 
         h.join().expect("Failed to Join Threads!");
+
+        let err1 = p1.send(true);
+        match err1 {
+            Err(_) => println!(""),
+            Ok(_) => panic!("Send allowed on closed channel")
+        }
+
+        let err2 = p2.recv();
+        match err2 {
+            Err(_) => println!(""),
+            Ok(_) => panic!("Recv allowed on closed channel")
+        }
     }
 }

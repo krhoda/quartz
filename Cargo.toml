@@ -5,6 +5,5 @@ members = [
 	"pi_chan",
 	"prop_cell",
 	"prop_chan",
-	"runner",
 	"wait_group",
 ]
