@@ -60,6 +60,9 @@ The act of creating a spark begins the execution of the function acting on the v
 Unlike futures offered by the standard library, execution begins with the declaration of the spark, and the function which declares the spark can continue parallel execution without interaction with the spark until calling `read`.
 
 #### WaitGroup -- Thank you BurntSushi
-Unaltered from: [this abandoned project](https://github.com/BurntSushi/chan/blob/master/src/wait_group.rs)
+Source unaltered from: [this abandoned project](https://github.com/BurntSushi/chan/blob/master/src/wait_group.rs)
+Tests added.
 
 This is the same concurrency construct (API and all) available in [Golang](https://gobyexample.com/waitgroups). It is similar to a `barrier` available in the standard library but with the act of lowering the `barrier`'s count is now separate from waiting on it. Such a thing becomes very covienent for a dynamic async batching, or async communication between (sets of) threads.
+
+NOTE: This is the only thing in the project that panics -- if the WaitGroup goes below 0 -- which matches the `golang` API. Not neccessarily sold on this implementation.
