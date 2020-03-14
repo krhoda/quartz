@@ -14,10 +14,41 @@ use wait_group::WaitGroup;
 // (true, Arc<Mutex<Some<TargetValue>>>) after the write event
 // It is best to think of this as a future that was run (at least) once then cached.
 #[derive(Clone)]
-pub struct IVar<T>(Arc<IVarMachine<T>>) where T: PartialEq;
+pub struct IVar<T>(Arc<IVarMachine<T>>)
+where
+    T: PartialEq;
+
+impl<T: PartialEq> PartialEq for IVar<T> {
+    fn eq(&self, other: &Self) -> bool {
+        // TODO: Determine if this is valuable?
+        // Compare the literal state of the channels.
+        // match self.state() == self.state() {}
+
+        let (a, b) = self.sample().unwrap();
+        let (x, y) = other.sample().unwrap();
+
+        // If both false, both contain None
+        // false == a == x
+        match (false == a) == !x {
+            true => true,
+            _ => match a == x {
+                // If mismatched, one contains None the other Some(T)
+                false => false,
+                // Truly compare the existant values.
+                _ => {
+                    let data1 = b.read();
+                    let data2 = y.read();
+                    &*data1 == &*data2
+                }
+            },
+        }
+    }
+}
 
 #[derive(Clone)]
-pub struct IVal<T>(Arc<RwLock<Option<T>>>) where T: PartialEq;
+pub struct IVal<T>(Arc<RwLock<Option<T>>>)
+where
+    T: PartialEq;
 
 // The read half of a RWLock who's write half is now inaccessible making it essetially lock free and threadsafe.
 impl<T: PartialEq> IVal<T> {
@@ -38,6 +69,12 @@ impl<T: PartialEq> IVal<T> {
     }
 }
 
+impl<T: PartialEq> PartialEq for IVal<T> {
+    fn eq(&self, other: &Self) -> bool {
+        &*self.read() == &*other.read()
+    }
+}
+
 #[derive(Debug)]
 pub enum IVarState {
     Unintialized, // Shouldn't happen, but who knows what someone will do.
@@ -55,7 +92,9 @@ impl fmt::Display for IVarState {
     }
 }
 
-struct IVarMachine<T> where T: PartialEq
+struct IVarMachine<T>
+where
+    T: PartialEq,
 {
     init: Arc<Mutex<bool>>,
     val: Arc<Mutex<IVal<T>>>,
@@ -111,15 +150,13 @@ impl<T: PartialEq> IVar<T> {
                         // NO BLOCKING!
                         let data = wrapper.read();
                         match &*data {
-                            Some(x) => {
-                                match &t == x {
-                                    true => Ok(()),
-                                    _ => Err(IVarError::ValueMismatch)
-                                }
+                            Some(x) => match &t == x {
+                                true => Ok(()),
+                                _ => Err(IVarError::ValueMismatch),
                             },
-                            None => Err(IVarError::ValueMismatch)
+                            None => Err(IVarError::ValueMismatch),
                         }
-                    },
+                    }
                     false => {
                         let mut data = wrapper.write();
                         *is_used = true;
@@ -134,7 +171,7 @@ impl<T: PartialEq> IVar<T> {
 
     // read on an initialized IVar returns a IVal which can freely be read from across threads.
     // Blocks until IVal is ready.
-    pub fn read(&mut self) -> Result<IVal<T>, IVarError> {
+    pub fn read(&self) -> Result<IVal<T>, IVarError> {
         match self.check_init() {
             // We have come into the possesion of an uninitialized IVar through spectacular means.
             false => Err(IVarError::Uninitialized),
@@ -149,7 +186,7 @@ impl<T: PartialEq> IVar<T> {
     // Like recieve, but non-blocking. Instead immediately returns a tuple
     // The first element is a bool indicating if send has occured, and the second element is
     // Either a clone of the Arc<Mutex<Option<TargetValue>>>, or a wrapper around a none.
-    pub fn sample(&mut self) -> Result<(bool, IVal<T>), IVarError> {
+    pub fn sample(&self) -> Result<(bool, IVal<T>), IVarError> {
         match self.check_init() {
             // We have come into the possession of an uninitialized IVar through spectacular means.
             false => Err(IVarError::Uninitialized),
@@ -216,7 +253,7 @@ mod tests {
     #[test]
     fn test_i_var() {
         let mut p1 = IVar::<usize>::new();
-        let mut q1 = p1.clone();
+        let q1 = p1.clone();
         let (intresting, _) = p1.sample().unwrap();
         match intresting {
             true => panic!("Recieved true from sample when it should've returned false"),
@@ -257,14 +294,14 @@ mod tests {
             };
         });
 
-        p1.send(1).unwrap();
-        let e = p1.send(2);
+        p1.write(1).unwrap();
+        let e = p1.write(2);
         match e {
             Err(x) => println!("Got expected err in mistmatched send: {}", x),
             Ok(_) => panic!("Got unexpected success in second send!?"),
         };
 
-        let no_e = p1.send(1);
+        let no_e = p1.write(1);
         match no_e {
             Err(x) => panic!("Got unexpected err in matched send err: {}", x),
             Ok(_) => println!("Got expected success in matched send"),
@@ -281,5 +318,34 @@ mod tests {
 
         println!("Will wait for thread 2");
         h.join().expect("Failed to Join Threads!");
+    }
+
+    #[test]
+    fn test_nested_i_var() {
+        let mut p1 = IVar::<usize>::new();
+        // let mut q1 = p1.clone();
+        let mut p2 = IVar::<IVar<usize>>::new();
+        let q2 = p2.clone();
+
+        let h = thread::spawn(move || {
+            let q1_val = q2.read().unwrap();
+            let q1 = q1_val.read();
+
+            match &*q1 {
+                Some(c) => {
+                    let d = c.read().unwrap();
+                    match &*d.read() {
+                        Some(e) => println!("Recieved contrived val {}", e),
+                        None => panic!("Heard None in contrived value"),
+                    };
+                }
+                None => panic!("Heard None in contrived value wrapper"),
+            }
+        });
+
+        p1.write(22).unwrap();
+        p2.write(p1).unwrap();
+
+        h.join().expect("Failed to join threads in nested IVar test")
     }
 }

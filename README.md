@@ -33,22 +33,28 @@ The subfolders in the workspace are a la carte concurrency structures, complete 
 
 The below is a simple explanation of each construct, both practically and theoretically. API/Implementation details will be provided in autogen'd docs one day soon.
 
+#### IVar -- Instance Variable (?) 
+NOTE: I'm not sure what the `I` stands for. Even though there is [writing](http://composition.al/blog/2013/09/22/some-example-mvar-ivar-and-lvar-programs-in-haskell/) on the topic and it appears in the Haskell[Par Monad source](http://hackage.haskell.org/package/monad-par-0.3.4.4/docs/src/Control-Monad-Par-Scheds-TraceInternal.html#IVar), I'm left to assume the concept maps to Objective-C's [instance variables](https://en.wikipedia.org/wiki/Instance_variable). My Objective-C is too weak to make any sense of the wikipedia example I saw. Feel free offer a correction or clarification if one is needed.
+
+Regardless of the opaque name, `IVar`s are a powerful structure required to compose determinisitic results out of non-deterministic execution. From a practical perspective, an `IVar` is a thread-safe, multi-reader future that can be requested more than once, but once fulfilled, will always return the same result (essentially cached). 
+
+In order to permit the highest number of deterministic implementations of `IVar`s, multiple writes are permitted but only the first write is actually assigned to the inner `IVal` (a name of my own creation?), all subsequent writes are simply compared to the inner value, and if they are not identical (thus the requirement of `PartialEq` the other structures in the package do not have), an error is raised.
+
+Before the first `write` occurs, attempts to to `read` the `IVar` will block. A non-blocking varient `sample` returns a tuple with the first element a boolean answer to whether the write event has occured, and the latter an `IVal` containing `None` or the result of the `write`.
+
+Once the `write` has occurred, all prospective `read`ers recieve an `IVal` which is a thread-safe, read-only wrapper around the value written. The value can be accessed through the `IVal`'s read method, which returns read lock guard from a `RwLock`.Subsequent `write`s only aquire this read access and compare the inner value against their attempt.
+
+Because there is only one write which occurs before any read lock can be distributed, the lock only acts as a promise of immutability, and will never be contested.
+
+It's a single-send, broadcast golang channel, if you will. Since `IVar` has `ParitalEq` implmented, `IVar`s can contain `IVar`s.
+
 #### PiChan -- Pi Calculus Channel
 Don't let the name intimidate you, it is a simplified `golang` channel that more closely aligns with the Rust borrow checker's line of thinking. 
+
 This structure, along with the definition of channel in Pi Calculus, is a single-use send, single-use recieve, rendezvous channel. Because of it's single-use principle, it is easier prevent leaks and deadlocks. The rendezvous aspect allows it to be used as a synchronizer between threads as well. The single recieve allows the passed value to be `take`n from the `Option`, making this very performant, and the channel disposable.
 
 #### PropCell -- Propagator Cell:
 COMING SOON!
-
-#### PropChan -- Propagator Channel
-Named because of its relationship to the work done with Propagator Networks.
-A powerful structure required to compose mathematically sound `non-derminisitic execution -> determinisitic result` systems is a future that can be requested more than once, but once fulfilled, will always return the same result -- which is this structure in practice. 
-
-In implementation, it resembles a relaxed version of `PiChan`, retaining the restriction that there is only one sender and one value, but permitting multiple read-only recievers. The send and recieve is also asyncronous -- the sender deposits the value, unblocks any future (or current) reciever, dissuades any future senders, and carries on. `PropChan` retains the `PiChan`'s `recv` behavior, of blocking until the send event occurs, but it permits multiple simultanious listeners.
-
-It also features the non-blocking `sample` which returns a two element tuple: a boolean value indicating whether the send event has occured, and if so, the same value as if you had waited for `recv`, otherwise the second value is a `None`. 
-
-The value that emerges from the `PropChan`, `PropResult`, is essentially the read half of a `RwLock` surrounding the deposited value. As the only writer has already written before the first reader is able to call `read`, it should never block or contain a poison error. Still, the error is exposed through `Result` of `read` in case of freak accident. Thus the result of the async sender's operation is now thread safe, immutable, quasi-lock-less once created, and blocked until created.
 
 #### Spark -- NOT IMPLEMENTED
 If determined to be valuable, will resemble the concept of a spark utilized by the [Haskell runtime](https://simonmar.github.io/bib/papers/threadscope.pdf). It would be a structure that accepted a variable of type `T`, a function from types `T -> U`, and exposed a method to retrieve a `U`. 
