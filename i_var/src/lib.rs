@@ -13,7 +13,7 @@ use wait_group::WaitGroup;
 // (false, Arc<Mutex<None>>) before the write event and
 // (true, Arc<Mutex<Some<TargetValue>>>) after the write event
 // It is best to think of this as a future that was run (at least) once then cached.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IVar<T>(Arc<IVarMachine<T>>)
 where
     T: PartialEq;
@@ -24,8 +24,7 @@ impl<T: PartialEq> PartialEq for IVar<T> {
         let (x, y) = other.sample().unwrap();
 
         // If both false, both contain None
-        // false == a == x
-        match (false == a) == !x {
+        match (false == a) && (false == x) {
             true => true,
             _ => match a == x {
                 // If mismatched, one contains None the other Some(T)
@@ -41,7 +40,7 @@ impl<T: PartialEq> PartialEq for IVar<T> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IVal<T>(Arc<RwLock<Option<T>>>)
 where
     T: PartialEq;
@@ -88,6 +87,7 @@ impl fmt::Display for IVarState {
     }
 }
 
+#[derive(Debug)]
 struct IVarMachine<T>
 where
     T: PartialEq,
@@ -344,5 +344,29 @@ mod tests {
 
         h.join()
             .expect("Failed to join threads in nested IVar test")
+    }
+
+    #[test]
+    fn test_i_var_partial_eq() {
+        let mut p1 = IVar::<usize>::new();
+        let mut p2 = IVar::<usize>::new();
+        let mut p3 = IVar::<usize>::new();
+
+        assert_eq!(p1, p2);
+        assert_eq!(p1, p3);
+        assert_eq!(p3, p2);
+
+        p1.write(1).unwrap();
+
+        assert_ne!(p1, p2);
+        assert_ne!(p1, p3);
+        assert_eq!(p3, p2);
+
+        p2.write(1).unwrap();
+        p3.write(2).unwrap();
+
+        assert_eq!(p1, p2);
+        assert_ne!(p1, p3);
+        assert_ne!(p3, p2);
     }
 }
