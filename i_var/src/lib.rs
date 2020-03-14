@@ -20,10 +20,6 @@ where
 
 impl<T: PartialEq> PartialEq for IVar<T> {
     fn eq(&self, other: &Self) -> bool {
-        // TODO: Determine if this is valuable?
-        // Compare the literal state of the channels.
-        // match self.state() == self.state() {}
-
         let (a, b) = self.sample().unwrap();
         let (x, y) = other.sample().unwrap();
 
@@ -245,6 +241,7 @@ impl Error for IVarError {
         None
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,7 +320,6 @@ mod tests {
     #[test]
     fn test_nested_i_var() {
         let mut p1 = IVar::<usize>::new();
-        // let mut q1 = p1.clone();
         let mut p2 = IVar::<IVar<usize>>::new();
         let q2 = p2.clone();
 
@@ -346,6 +342,7 @@ mod tests {
         p1.write(22).unwrap();
         p2.write(p1).unwrap();
 
-        h.join().expect("Failed to join threads in nested IVar test")
+        h.join()
+            .expect("Failed to join threads in nested IVar test")
     }
 }

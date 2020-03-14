@@ -23,7 +23,7 @@ Implementation and exposed API influences include:
 Theoretical underpinnings of the unseen guts include:
 * The [process calculus](http://usingcsp.com/cspbook.pdf) of Sir Tony Hoare and [others](https://www.researchgate.net/publication/220368672_A_Reflective_Higher-order_Calculus/fulltext/0ffc60670cf255165fc81be2/A-Reflective-Higher-order-Calculus.pdf), including [Pi Calculus](https://en.wikipedia.org/wiki/%CE%A0-calculus)
 * The [various](http://groups.csail.mit.edu/genesis/papers/radul%202009.pdf) [works](https://groups.csail.mit.edu/mac/users/gjs/6.945/readings/art.pdf) on [propagators](https://groups.csail.mit.edu/mac/users/gjs/propagators/revised-html.html) as a [model of computation](https://github.com/namin/propagators) of Alexey Radul and Gerrald Sussman
-* The [works](https://users.soe.ucsc.edu/~lkuper/papers/lvars-fhpc13.pdf) and [libraries](https://hackage.haskell.org/package/lvish) of Lindsey Kuper and Ryan Newton surrounding lattice variables (and their near cousins joined-semi-lattices)
+* The [works](https://users.soe.ucsc.edu/~lkuper/papers/lvars-fhpc13.pdf) and [libraries](https://hackage.haskell.org/package/lvish) of Lindsey Kuper and Ryan Newton surrounding lattice variables (and their [near cousins](http://composition.al/blog/2013/09/22/some-example-mvar-ivar-and-lvar-programs-in-haskell/))
 * The [experimental library](https://github.com/ekmett/guanxi) and [talks](https://www.youtube.com/watch?v=s2dknG7KryQ) of Edward Kmett involving basically all of the above.
 
 ### Structure:
@@ -33,20 +33,18 @@ The subfolders in the workspace are a la carte concurrency structures, complete 
 
 The below is a simple explanation of each construct, both practically and theoretically. API/Implementation details will be provided in autogen'd docs one day soon.
 
-#### IVar -- Instance Variable (?) 
-NOTE: I'm not sure what the `I` stands for. Even though there is [writing](http://composition.al/blog/2013/09/22/some-example-mvar-ivar-and-lvar-programs-in-haskell/) on the topic and it appears in the Haskell[Par Monad source](http://hackage.haskell.org/package/monad-par-0.3.4.4/docs/src/Control-Monad-Par-Scheds-TraceInternal.html#IVar), I'm left to assume the concept maps to Objective-C's [instance variables](https://en.wikipedia.org/wiki/Instance_variable). My Objective-C is too weak to make any sense of the wikipedia example I saw. Feel free offer a correction or clarification if one is needed.
+#### IVar -- Immutable (Runtime Instantiated) Variable 
+Regardless of the opaque name, `IVar`s are a powerful structure required to compose determinisitic results out of non-deterministic execution. From a practical perspective, an `IVar` is future with a cached result which is thread-safe and read-only once established. Only a single mutation occurs in the `IVar::<T>`'s internal state, going from `None` to `Some(T)`. 
 
-Regardless of the opaque name, `IVar`s are a powerful structure required to compose determinisitic results out of non-deterministic execution. From a practical perspective, an `IVar` is a thread-safe, multi-reader future that can be requested more than once, but once fulfilled, will always return the same result (essentially cached). 
-
-In order to permit the highest number of deterministic implementations of `IVar`s, multiple writes are permitted but only the first write is actually assigned to the inner `IVal` (a name of my own creation?), all subsequent writes are simply compared to the inner value, and if they are not identical (thus the requirement of `PartialEq` the other structures in the package do not have), an error is raised.
+No reader is permitted access to the value when it is `None`. No write occurs after the first transformation. If a subsequent write is attempted, the value of the later write is checked against the initial write and if a difference is detected, only then an error is raised. This allows multiple fulfillers and consumers of the `IVar`, as long as all fulfillers are consistent in their final result. Other than the initial synchronzation of the first write occuring before the first read, the data structure is essentially lockless.
 
 Before the first `write` occurs, attempts to to `read` the `IVar` will block. A non-blocking varient `sample` returns a tuple with the first element a boolean answer to whether the write event has occured, and the latter an `IVal` containing `None` or the result of the `write`.
 
-Once the `write` has occurred, all prospective `read`ers recieve an `IVal` which is a thread-safe, read-only wrapper around the value written. The value can be accessed through the `IVal`'s read method, which returns read lock guard from a `RwLock`.Subsequent `write`s only aquire this read access and compare the inner value against their attempt.
+Once the `write` has occurred, all prospective `read`ers recieve an `IVal` which is a thread-safe, read-only wrapper around the value written. The value can be accessed through the `IVal`'s read method, which returns read lock guard from a `RwLock`.Subsequent `write`s only acquire this read access and compare the inner value against their attempt.
 
 Because there is only one write which occurs before any read lock can be distributed, the lock only acts as a promise of immutability, and will never be contested.
 
-It's a single-send, broadcast golang channel, if you will. Since `IVar` has `ParitalEq` implmented, `IVar`s can contain `IVar`s.
+Since `IVar` has `ParitalEq` implemented, `IVar`s can contain `IVar`s.
 
 #### PiChan -- Pi Calculus Channel
 Don't let the name intimidate you, it is a simplified `golang` channel that more closely aligns with the Rust borrow checker's line of thinking. 

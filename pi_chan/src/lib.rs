@@ -2,12 +2,10 @@ use std::error::Error;
 use std::fmt;
 use std::sync::{Arc, Barrier, Mutex};
 
-// AS WITH PropChan CONSIDER FOR DEADLOCK FREEDOM:
+// CONSIDER FOR DEADLOCK FREEDOM:
 // Breaking into sender + reciever, killing a wait if the other drops from exisitence.
 
 // This is a single-use rendezvous channel, obeying the laws of Pi Calculus.
-// Lack of additional locks makes it more performant and lower profile than
-// it's closely related cousin PropChan. Simplicity vs. Vercitility.
 #[derive(Clone)]
 pub struct PiChan<T>(Arc<PiMachine<T>>);
 
