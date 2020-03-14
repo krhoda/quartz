@@ -1,5 +1,5 @@
 [package]
-name = "prop_chan"
+name = "i_var"
 version = "0.1.0"
 authors = ["K Rhoda <kelseydrhoda@gmail.com>"]
 edition = "2018"

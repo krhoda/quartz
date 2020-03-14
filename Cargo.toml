@@ -4,6 +4,6 @@ members = [
 	"spark",
 	"pi_chan",
 	"prop_cell",
-	"prop_chan",
+	"i_var",
 	"wait_group",
 ]
