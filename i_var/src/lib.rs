@@ -6,7 +6,7 @@ use wait_group::WaitGroup;
 
 // Functions as a Multi-Writer, Single-Value, Multi-Consumer channel.
 // No redezvous.
-// Multiple write can write to the same IVar, provided they are writing the same value
+// Multiple writers can write to the same IVar, provided they are writing the same value
 // Different values are an error
 // Using read a caller awaits the write event
 // Using sample a caller recieves either
@@ -20,20 +20,36 @@ where
 
 impl<T: PartialEq> PartialEq for IVar<T> {
     fn eq(&self, other: &Self) -> bool {
-        let (a, b) = self.sample().unwrap();
-        let (x, y) = other.sample().unwrap();
+        let res1 = self.sample();
+        let res2 = other.sample();
 
-        // If both false, both contain None
-        match (false == a) && (false == x) {
-            true => true,
-            _ => match a == x {
-                // If mismatched, one contains None the other Some(T)
-                false => false,
-                // Truly compare the existant values.
-                _ => {
-                    let data1 = b.read();
-                    let data2 = y.read();
-                    &*data1 == &*data2
+        match res1 {
+            Err(_) => match res2 {
+                Err(_) => true,
+                Ok(_) => false,
+            },
+
+            Ok(_) => match res2 {
+                Err(_) => false,
+                Ok(_) => {
+                    // Safe to unwrap.
+                    let (a, b) = res1.unwrap();
+                    let (x, y) = res2.unwrap();
+
+                    // If both false, both contain None
+                    match (false == a) && (false == x) {
+                        true => true,
+                        _ => match a == x {
+                            // If mismatched, one contains None the other Some(T)
+                            false => false,
+                            // Truly compare the existant values.
+                            _ => {
+                                let data1 = b.read();
+                                let data2 = y.read();
+                                &*data1 == &*data2
+                            }
+                        },
+                    }
                 }
             },
         }
