@@ -1,8 +1,15 @@
 use std::cmp::PartialEq;
 use std::error::Error;
 use std::fmt;
-use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, LockResult, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use wait_group::WaitGroup;
+
+// TODOS:
+// 1 -- check_init / check_send_guard need to return errs 
+// 2 -- Poison errs need to bubble
+// 3 -- hide the None -> Option<T> transformation, since it cannot be None.
+// 4 -- Add ImpossibleState err to support above.
+    
 
 // Functions as a Multi-Writer, Single-Value, Multi-Consumer channel.
 // No redezvous.
@@ -64,6 +71,9 @@ where
 // The read half of a RWLock who's write half is now inaccessible making it essetially lock free and threadsafe.
 impl<T: PartialEq> IVal<T> {
     pub fn read(&self) -> RwLockReadGuard<'_, Option<T>> {
+        // NOTE: the lock can never be poisoned at this point, thus the unchecked unwrap.
+        // Panicking while holding the write lock would mean never writing a variable.
+        // The IVal could not be read without the lock being "unpoisonable"
         self.0.read().unwrap()
     }
 
@@ -71,8 +81,8 @@ impl<T: PartialEq> IVal<T> {
         IVal::<T>(Arc::clone(&self.0))
     }
 
-    fn write(&mut self) -> RwLockWriteGuard<'_, Option<T>> {
-        self.0.write().unwrap()
+    fn write(&mut self) -> LockResult<RwLockWriteGuard<'_, Option<T>>> {
+        self.0.write()
     }
 
     fn new(a: Arc<RwLock<Option<T>>>) -> IVal<T> {
@@ -153,29 +163,61 @@ impl<T: PartialEq> IVar<T> {
         match self.check_init() {
             // We have come into the possession of an uninitialized IVar through spectacular means.
             false => Err(IVarError::Uninitialized),
-            true => {
-                let mut is_used = self.0.send_guard.lock().unwrap();
-                let mut wrapper = self.0.val.lock().unwrap();
 
-                match *is_used {
-                    true => {
-                        // NO BLOCKING!
-                        let data = wrapper.read();
-                        match &*data {
-                            Some(x) => match &t == x {
-                                true => Ok(()),
-                                _ => Err(IVarError::ValueMismatch),
-                            },
-                            None => Err(IVarError::ValueMismatch),
-                        }
-                    }
-                    false => {
-                        let mut data = wrapper.write();
-                        *is_used = true;
-                        *data = Some(t);
-                        self.0.recv_wg.done();
-                        Ok(())
-                    }
+            true => {
+                let res1 = self.0.send_guard.lock();
+                match res1 {
+                    // TODO: Bubble up poison err:
+                    Err(_) => Err(IVarError::PosionWriteGuard),
+
+                    // If the first lock works, check the second.
+                    Ok(mut is_used) => match self.0.val.lock() {
+                        // TODO: Bubble up poison err:
+                        Err(_) => Err(IVarError::PosionValueGuard),
+
+                        // Assuming all locks are good, and they should be
+                        // Either write or compare.
+                        Ok(mut wrapper) => match *is_used {
+                            true => {
+                                // NO BLOCKING!
+                                let data = wrapper.read();
+                                match &*data {
+                                    Some(x) => match &t == x {
+                                        true => Ok(()),
+                                        _ => Err(IVarError::ValueMismatch),
+                                    },
+
+                                    // This would only trip in the frightening
+                                    // "Someone panics holding the write lock" situation.
+                                    // This could result in a deadlock, but interestingly is detectable.
+                                    // (&*data == None && *is_used) = deadlock_for_readers.
+                                    // This could be transmitted to the recievers and they return with a (documented) error.
+                                    // Not implementing because I'm not convinced anyone could panic holding the write lock
+                                    // Short of hardware failure.
+                                    // Leaving this comment because I could very well be wrong.
+                                    None => Err(IVarError::ValueMismatch),
+                                }
+                            }
+                            false => {
+                                // prevents any futher use of the write lock.
+                                // note, we do this before checking the write lock,
+                                // prefering a detectable deadlock to runtime panic.
+                                *is_used = true;
+
+                                // the only use of the write lock.
+                                let res1 = wrapper.write();
+                                match res1 {
+                                    // TODO: PASS THE WRITE LOCK ERR AS SOURCE.
+                                    Err(_) => Err(IVarError::PosionWriteLock),
+                                    Ok(mut data) => {
+                                        *data = Some(t);
+                                        self.0.recv_wg.done();
+                                        Ok(())
+                                    }
+                                }
+                            }
+                        },
+                    },
                 }
             }
         }
@@ -189,7 +231,12 @@ impl<T: PartialEq> IVar<T> {
             false => Err(IVarError::Uninitialized),
             true => {
                 self.0.recv_wg.wait();
-                Ok(self.0.val.lock().unwrap().clone())
+
+                // TODO: Bubble up poison err.
+                match self.0.val.lock() {
+                    Err(_) => Err(IVarError::PosionValueGuard),
+                    Ok(x) => Ok(x.clone()),
+                }
             }
         }
     }
@@ -204,22 +251,29 @@ impl<T: PartialEq> IVar<T> {
             false => Err(IVarError::Uninitialized),
             _ => {
                 // Check if used and block other recvers.
-                let is_complete = self.0.send_guard.lock().unwrap();
-
-                match *is_complete {
-                    false => Ok((false, IVal::<T>::new(Arc::new(RwLock::new(None))))),
-                    _ => {
-                        // We might be right alongside the sender.
-                        // In practice, should not block.
-                        self.0.recv_wg.wait();
-
-                        Ok((true, self.0.val.lock().unwrap().clone()))
-                    }
+                let res1 = self.0.send_guard.lock();
+                match res1 {
+                    // TODO: Bubble up err
+                    Err(_) => Err(IVarError::PosionWriteGuard),
+                    Ok(is_complete) => match *is_complete {
+                        false => Ok((false, IVal::<T>::new(Arc::new(RwLock::new(None))))),
+                        _ => {
+                            // We might be right alongside the sender.
+                            // In practice, should not block.
+                            self.0.recv_wg.wait();
+                            match self.0.val.lock() {
+                                // TODO: Bubble up err
+                                Err(_) => Err(IVarError::PosionValueGuard),
+                                Ok(x) => Ok((true, x.clone())),
+                            }
+                        }
+                    },
                 }
             }
         }
     }
 
+    // TODO: CHECK THESE UNWRAPS:
     fn check_send_used(&self) -> bool {
         *self.0.send_guard.lock().unwrap()
     }
@@ -229,17 +283,24 @@ impl<T: PartialEq> IVar<T> {
     }
 }
 
+// TODO: BUBBLE UP LOCK ERRS:
+
 #[derive(Debug)]
 pub enum IVarError {
-    ValueMismatch,
+    PosionWriteLock,
+    PosionWriteGuard,
+    PosionValueGuard,
     Uninitialized,
+    ValueMismatch,
 }
 
 impl fmt::Display for IVarError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            IVarError::PosionWriteLock => write!(f, "Impossible poisoned write lock, this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz"),
+            IVarError::PosionWriteGuard => write!(f, "A thread has panicked while holding the IVar's write guard, this cell is now inaccessible this error is likely from a healthy thread, this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz"),
+            IVarError::PosionValueGuard => write!(f, "Some other operation has panicked while holding the IVars value guard, this cell is now inaccessible this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz"),
             IVarError::ValueMismatch => write!(f, "IVar recieved differing values on write, only one value may be written to a give IVar"),
-
             IVarError::Uninitialized => write!(f, "IVar must be initialized to use safely"),
         }
     }
@@ -248,6 +309,9 @@ impl fmt::Display for IVarError {
 impl Error for IVarError {
     fn description(&self) -> &str {
         match self {
+            IVarError::PosionWriteLock =>  "Impossible poisoned write lock, this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz",
+            IVarError::PosionWriteGuard => "A thread has panicked while holding the IVar's write guard, this cell is now inaccessible, this error is likely from a healthy thread, this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz",
+            IVarError::PosionValueGuard => "Some other operation has panicked while holding the IVars value guard, this cell is now inaccessible this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz",
             IVarError::ValueMismatch => "IVar recieved differing values on write, only one value may be written to a give IVar",
             IVarError::Uninitialized => "IVar must be initialized to use safely",
         }

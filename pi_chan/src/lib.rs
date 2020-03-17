@@ -2,6 +2,11 @@ use std::error::Error;
 use std::fmt;
 use std::sync::{Arc, Barrier, Mutex};
 
+// TODO:
+// 1 -- Hide the Option<T> implementation from the end user
+// 2 -- Add ImpossibleState error to support the above
+// 3 -- Add PoisonErrs similar to IVar
+
 // CONSIDER FOR DEADLOCK FREEDOM:
 // Breaking into sender + reciever, killing a wait if the other drops from exisitence.
 

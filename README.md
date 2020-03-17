@@ -34,6 +34,8 @@ The subfolders in the workspace are a la carte concurrency structures, complete 
 The below is a simple explanation of each construct, both practically and theoretically. API/Implementation details will be provided in autogen'd docs one day soon.
 
 #### IVar -- Immutable (Runtime Instantiated) Variable 
+If one is to get technical, this is somewhere between a Haskell style IVar, and an LVish style LVar. Don't worry, the full blown LVars are coming.
+
 Regardless of the opaque name, `IVar`s are a powerful structure required to compose determinisitic results out of non-deterministic execution. From a practical perspective, an `IVar` is future with a cached result which is thread-safe and read-only once established. Only a single mutation occurs in the `IVar::<T>`'s internal state, going from `None` to `Some(T)`. 
 
 No reader is permitted access to the value when it is `None`. No write occurs after the first transformation. If a subsequent write is attempted, the value of the later write is checked against the initial write and if a difference is detected, only then an error is raised. This allows multiple fulfillers and consumers of the `IVar`, as long as all fulfillers are consistent in their final result. Other than the initial synchronzation of the first write occuring before the first read, the data structure is essentially lockless.
