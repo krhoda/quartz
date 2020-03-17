@@ -1,17 +1,16 @@
-# Quartz: Crystal Clear Concurrency -- Experimental.
+# Quartz: Crystal Clear Parallelism through Concurrency -- Experimental.
 
-To paraphrase Philip Wadler, some tools are invented, others are discovered. Quartz aims to bring the discoveries of applicable mathematics to the world of concurrent abrstractions, a world currently dominated by invention. Quartz's internal approach (via Process Calculi and Propagator Networks) seeks to make no trade off between safety and speed.
+Quartz aims to bring the discoveries of applicable mathematics to the world of concurrent and parallel abrstractions, a world currently dominated by invention. Quartz's internal approach seeks to make no trade off between safety and speed. Quartz's API seeks to be simple, composable, and above all else, reduce the number of "effects" (lock-contention, memory leaks, and deadlocks) a developer needs to reason about when dealing with parallelism. It accomplishes this through the useage of flexible inter-"process"/"thread"/"task" structures that can composed. 
+
+The long term goal is something like a more flexible, barebones [Haxl](https://github.com/facebook/Haxl) for Rust, but clearly, a different approach will be required (and is alluded to in the theory sections).
+
+As it stands, it is a set of a la carte thread-safe communication mechanisms/value containers.
 
 It is currently a work-in-progress and much is left to be achieved.
 
-As it stands, it is a set of a la carte thread-safe communication mechanisms.
-If all goes well, it might be a Rust Propagator Framework for low/zero-cost futures.
+Learning from the dangers of naming concepts `Monads`, we're going to give these structures names relevant to their useage in day to day computing, but we're also going to outline their mathematical/research heritage. The reason for this isn't trivia, but a formal proof of why these structures should have worthwhile properties, such as being impossible to leak or deadlock free. Additionally, by declaring these structures in concrete, practical, and mathematical terms, we avoid the confusion that ill-defined terms have caused, such as the exact distinction of (actor and channels)[https://core.ac.uk/download/pdf/84869002.pdf]. Questions of bug or feature become easier to navigate as well.
 
-### By The Power of Math and Enthusiasm, I hope to provide:
-1) SAFE Concurrency Constructs/Primatives. (So far, 0 lines of `unsafe` code and 0 library dependencies)
-2) Freedom from deadlocks. (Idea in Progress, but it boils down to process calculi using ARCs or some sort of propagator framework)
-3) Zero-Cost Abastraction Futures. (By way of Lattice Variables and Propagator Networks -- And I will settle for Low-Cost if I have to).
-4) Perpetual Motion because if we get 2 and 3, we've got to be on a roll.
+### TODO REFACTOR THE LIBS TO MEET THIS CONVENTION.
 
 ### The shoulders of giants:
 Implementation and exposed API influences include: 
@@ -26,27 +25,24 @@ Theoretical underpinnings of the unseen guts include:
 * The [works](https://users.soe.ucsc.edu/~lkuper/papers/lvars-fhpc13.pdf) and [libraries](https://hackage.haskell.org/package/lvish) of Lindsey Kuper and Ryan Newton surrounding lattice variables (and their [near cousins](http://composition.al/blog/2013/09/22/some-example-mvar-ivar-and-lvar-programs-in-haskell/))
 * The [experimental library](https://github.com/ekmett/guanxi) and [talks](https://www.youtube.com/watch?v=s2dknG7KryQ) of Edward Kmett involving basically all of the above.
 
-### Structure:
+### Structures:
 
-#### Overview: 
-The subfolders in the workspace are a la carte concurrency structures, complete with module level testing. Currently, they work only in a threaded concurrency model. Futures will eventually be addressed. Mix, match, pay only for what you need.
+#### OnceCell -- Thread-Safe Write-Once Variable 
+##### In Practice:
+A `OnceCell<T>` (where `T: PartialEq`) is useful because it acts like a future that after being fulfilled once, is cached. In practice, it is a variable which is either unwritten to, or is of type `T`. The variable is only transformed once -- from unwritten to `T`. To avoid rejecting deterministic programs, `write` can be called more than once, and only if the subsequent value does not match the first write's value, an error is raised.
 
-The below is a simple explanation of each construct, both practically and theoretically. API/Implementation details will be provided in autogen'd docs one day soon.
+A reader can access the value inside of a (cloned or original) `OnceCell` by calling it's methods `read` or `sample`. The first is blocking and returns a `OnceVal<T>` (described below), the second returns a `<Option<OnceVal<T>>>`, with `None` in cases before `write` was concluded.
 
-#### IVar -- Immutable (Runtime Instantiated) Variable 
-If one is to get technical, this is somewhere between a Haskell style IVar, and an LVish style LVar. Don't worry, the full blown LVars are coming.
+The `OnceVal<T>` returned by `read` or a successful `sample` in turn also has a `read` method which, unlike the `OnceCell` wrapper, is non-blocking, even though it returns a `RwLockGuard`. How? For usage purposes, it's not important (though do read on in the other sections if you're curious).
 
-Regardless of the opaque name, `IVar`s are a powerful structure required to compose determinisitic results out of non-deterministic execution. From a practical perspective, an `IVar` is future with a cached result which is thread-safe and read-only once established. Only a single mutation occurs in the `IVar::<T>`'s internal state, going from `None` to `Some(T)`. 
+The power of this structure is that it can be shared by many reading and writing threads without any contention over locks, only the synchronization of the first write concluding before the first read could be viewed as blocking. The value is availble as soon as it is ready, thread-safe, and compiler-enforced immutable. For more information on situations where multiple concurrent redundant writes might be useful, [here is a relink from above](http://composition.al/blog/2013/09/22/some-example-mvar-ivar-and-lvar-programs-in-haskell/).
 
-No reader is permitted access to the value when it is `None`. No write occurs after the first transformation. If a subsequent write is attempted, the value of the later write is checked against the initial write and if a difference is detected, only then an error is raised. This allows multiple fulfillers and consumers of the `IVar`, as long as all fulfillers are consistent in their final result. Other than the initial synchronzation of the first write occuring before the first read, the data structure is essentially lockless.
+`OnceCell` also implements `PartialEq` so `OnceCell`s can contain `OnceCell`s.
 
-Before the first `write` occurs, attempts to to `read` the `IVar` will block. A non-blocking varient `sample` returns a tuple with the first element a boolean answer to whether the write event has occured, and the latter an `IVal` containing `None` or the result of the `write`.
+##### Implementation and Theory:
+By enforcing the condition that only the same thing can written to the `OnceCell`, any subsequent writes can be converted into another read. Thus we have a mechanism by which there is one write then many reads, which nicely pairs with an abstraction over a `RwLock`. Once we know the write lock will never be held again, `read`s of a written `OnceVal` will never block across `n` threads. Only the `OnceCell` has access to the write mechanism, and even then, can only gain it once.
 
-Once the `write` has occurred, all prospective `read`ers recieve an `IVal` which is a thread-safe, read-only wrapper around the value written. The value can be accessed through the `IVal`'s read method, which returns read lock guard from a `RwLock`.Subsequent `write`s only acquire this read access and compare the inner value against their attempt.
-
-Because there is only one write which occurs before any read lock can be distributed, the lock only acts as a promise of immutability, and will never be contested.
-
-Since `IVar` has `ParitalEq` implemented, `IVar`s can contain `IVar`s.
+The theory is similiar to the [haskell implementation of IVars](), but includes the relaxation for multiple concurrent writes, it becomes closer to [LVish]() style `LVars`, but without the ability to "grow" -- we will address that idea later.
 
 #### PiChan -- Pi Calculus Channel
 Don't let the name intimidate you, it is a simplified `golang` channel that more closely aligns with the Rust borrow checker's line of thinking. 
@@ -63,7 +59,7 @@ The act of creating a spark begins the execution of the function acting on the v
 
 Unlike futures offered by the standard library, execution begins with the declaration of the spark, and the function which declares the spark can continue parallel execution without interaction with the spark until calling `read`.
 
-#### WaitGroup -- Thank you BurntSushi
+#### WaitGroup -- Thank you Golang and BurntSushi
 Source unaltered from: [this abandoned project](https://github.com/BurntSushi/chan/blob/master/src/wait_group.rs)
 Tests added.
 
