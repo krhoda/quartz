@@ -1,6 +1,6 @@
 # Quartz: Crystal Clear Concurrency -- Experimental.
 
-To paraphrase Philip Wadler, some tools are invented, others are discovered. Quartz aims to bring the discoveries of applicable mathmatics to the world of concurrent abrstractions, a world currently dominated by invention. Quartz's internal approach (via Process Calculi and Propagator Networks) seeks to make no trade off between safety and speed.
+To paraphrase Philip Wadler, some tools are invented, others are discovered. Quartz aims to bring the discoveries of applicable mathematics to the world of concurrent abrstractions, a world currently dominated by invention. Quartz's internal approach (via Process Calculi and Propagator Networks) seeks to make no trade off between safety and speed.
 
 It is currently a work-in-progress and much is left to be achieved.
 
