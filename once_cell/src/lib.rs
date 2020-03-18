@@ -13,7 +13,7 @@ use wait_group::WaitGroup;
 
 // Functions as a Multi-Writer, Single-Value, Multi-Consumer channel.
 // No redezvous.
-// Multiple writers can write to the same IVar, provided they are writing the same value
+// Multiple writers can write to the same OnceCell, provided they are writing the same value
 // Different values are an error
 // Using read a caller awaits the write event
 // Using sample a caller recieves either
@@ -21,11 +21,11 @@ use wait_group::WaitGroup;
 // (true, Arc<Mutex<Some<TargetValue>>>) after the write event
 // It is best to think of this as a future that was run (at least) once then cached.
 #[derive(Clone, Debug)]
-pub struct IVar<T>(Arc<IVarMachine<T>>)
+pub struct OnceCell<T>(Arc<OnceCellMachine<T>>)
 where
     T: PartialEq;
 
-impl<T: PartialEq> PartialEq for IVar<T> {
+impl<T: PartialEq> PartialEq for OnceCell<T> {
     fn eq(&self, other: &Self) -> bool {
         let res1 = self.sample();
         let res2 = other.sample();
@@ -64,68 +64,68 @@ impl<T: PartialEq> PartialEq for IVar<T> {
 }
 
 #[derive(Clone, Debug)]
-pub struct IVal<T>(Arc<RwLock<Option<T>>>)
+pub struct OnceVal<T>(Arc<RwLock<Option<T>>>)
 where
     T: PartialEq;
 
 // The read half of a RWLock who's write half is now inaccessible making it essetially lock free and threadsafe.
-impl<T: PartialEq> IVal<T> {
+impl<T: PartialEq> OnceVal<T> {
     pub fn read(&self) -> RwLockReadGuard<'_, Option<T>> {
         // NOTE: the lock can never be poisoned at this point, thus the unchecked unwrap.
         // Panicking while holding the write lock would mean never writing a variable.
-        // The IVal could not be read without the lock being "unpoisonable"
+        // The OnceVal could not be read without the lock being "unpoisonable"
         self.0.read().unwrap()
     }
 
-    pub fn clone(&self) -> IVal<T> {
-        IVal::<T>(Arc::clone(&self.0))
+    pub fn clone(&self) -> OnceVal<T> {
+        OnceVal::<T>(Arc::clone(&self.0))
     }
 
     fn write(&mut self) -> LockResult<RwLockWriteGuard<'_, Option<T>>> {
         self.0.write()
     }
 
-    fn new(a: Arc<RwLock<Option<T>>>) -> IVal<T> {
-        IVal::<T>(a)
+    fn new(a: Arc<RwLock<Option<T>>>) -> OnceVal<T> {
+        OnceVal::<T>(a)
     }
 }
 
-impl<T: PartialEq> PartialEq for IVal<T> {
+impl<T: PartialEq> PartialEq for OnceVal<T> {
     fn eq(&self, other: &Self) -> bool {
         &*self.read() == &*other.read()
     }
 }
 
 #[derive(Debug)]
-pub enum IVarState {
+pub enum OnceCellState {
     Unintialized, // Shouldn't happen, but who knows what someone will do.
     Empty,        // The Write has not occured.
     Filled,       // A transfer was made, now is a place to retrieve refs.
 }
 
-impl fmt::Display for IVarState {
+impl fmt::Display for OnceCellState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            IVarState::Unintialized => write!(f, "Uninitalized (ILLEGAL, USE IVar::<T>::new)"),
-            IVarState::Empty => write!(f, "Empty"),
-            IVarState::Filled => write!(f, "Filled"),
+            OnceCellState::Unintialized => write!(f, "Uninitalized (ILLEGAL, USE OnceCell::<T>::new)"),
+            OnceCellState::Empty => write!(f, "Empty"),
+            OnceCellState::Filled => write!(f, "Filled"),
         }
     }
 }
 
 #[derive(Debug)]
-struct IVarMachine<T>
+struct OnceCellMachine<T>
 where
     T: PartialEq,
 {
     init: Arc<Mutex<bool>>,
-    val: Arc<Mutex<IVal<T>>>,
+    val: Arc<Mutex<OnceVal<T>>>,
     send_guard: Arc<Mutex<bool>>,
     recv_wg: WaitGroup,
 }
 
-impl<T: PartialEq> IVar<T> {
-    pub fn new() -> IVar<T> {
+impl<T: PartialEq> OnceCell<T> {
+    pub fn new() -> OnceCell<T> {
         let recv_wg = WaitGroup::new();
         recv_wg.add(1);
 
@@ -137,43 +137,43 @@ impl<T: PartialEq> IVar<T> {
         // against the value of their write, and an error will be
         // raised if the values mismatch.
 
-        IVar::<T>(Arc::new(IVarMachine::<T> {
+        OnceCell::<T>(Arc::new(OnceCellMachine::<T> {
             init: Arc::new(Mutex::new(true)),
-            val: Arc::new(Mutex::new(IVal::new(Arc::new(RwLock::new(None))))),
+            val: Arc::new(Mutex::new(OnceVal::new(Arc::new(RwLock::new(None))))),
             send_guard: Arc::new(Mutex::new(false)),
             recv_wg: recv_wg,
         }))
     }
 
-    // Check the state of a given IVar
-    pub fn state(&self) -> IVarState {
+    // Check the state of a given OnceCell
+    pub fn state(&self) -> OnceCellState {
         match self.check_init() {
-            false => IVarState::Unintialized,
+            false => OnceCellState::Unintialized,
             _ => match self.check_send_used() {
-                false => IVarState::Empty,
-                _ => IVarState::Filled,
+                false => OnceCellState::Empty,
+                _ => OnceCellState::Filled,
             },
         }
     }
 
-    // Attempt to deposit a value into the IVar.
-    // If the IVar is not initialized, or if the value is neither the first
+    // Attempt to deposit a value into the OnceCell.
+    // If the OnceCell is not initialized, or if the value is neither the first
     // nor matches the existing value, an error is raised.
-    pub fn write(&mut self, t: T) -> Result<(), IVarError> {
+    pub fn write(&mut self, t: T) -> Result<(), OnceCellError> {
         match self.check_init() {
-            // We have come into the possession of an uninitialized IVar through spectacular means.
-            false => Err(IVarError::Uninitialized),
+            // We have come into the possession of an uninitialized OnceCell through spectacular means.
+            false => Err(OnceCellError::Uninitialized),
 
             true => {
                 let res1 = self.0.send_guard.lock();
                 match res1 {
                     // TODO: Bubble up poison err:
-                    Err(_) => Err(IVarError::PosionWriteGuard),
+                    Err(_) => Err(OnceCellError::PosionWriteGuard),
 
                     // If the first lock works, check the second.
                     Ok(mut is_used) => match self.0.val.lock() {
                         // TODO: Bubble up poison err:
-                        Err(_) => Err(IVarError::PosionValueGuard),
+                        Err(_) => Err(OnceCellError::PosionValueGuard),
 
                         // Assuming all locks are good, and they should be
                         // Either write or compare.
@@ -184,7 +184,7 @@ impl<T: PartialEq> IVar<T> {
                                 match &*data {
                                     Some(x) => match &t == x {
                                         true => Ok(()),
-                                        _ => Err(IVarError::ValueMismatch),
+                                        _ => Err(OnceCellError::ValueMismatch),
                                     },
 
                                     // This would only trip in the frightening
@@ -195,7 +195,7 @@ impl<T: PartialEq> IVar<T> {
                                     // Not implementing because I'm not convinced anyone could panic holding the write lock
                                     // Short of hardware failure.
                                     // Leaving this comment because I could very well be wrong.
-                                    None => Err(IVarError::ValueMismatch),
+                                    None => Err(OnceCellError::ValueMismatch),
                                 }
                             }
                             false => {
@@ -208,7 +208,7 @@ impl<T: PartialEq> IVar<T> {
                                 let res1 = wrapper.write();
                                 match res1 {
                                     // TODO: PASS THE WRITE LOCK ERR AS SOURCE.
-                                    Err(_) => Err(IVarError::PosionWriteLock),
+                                    Err(_) => Err(OnceCellError::PosionWriteLock),
                                     Ok(mut data) => {
                                         *data = Some(t);
                                         self.0.recv_wg.done();
@@ -223,47 +223,47 @@ impl<T: PartialEq> IVar<T> {
         }
     }
 
-    // read on an initialized IVar returns a IVal which can freely be read from across threads.
-    // Blocks until IVal is ready.
-    pub fn read(&self) -> Result<IVal<T>, IVarError> {
+    // read on an initialized OnceCell returns a OnceVal which can freely be read from across threads.
+    // Blocks until OnceVal is ready.
+    pub fn read(&self) -> Result<OnceVal<T>, OnceCellError> {
         match self.check_init() {
-            // We have come into the possesion of an uninitialized IVar through spectacular means.
-            false => Err(IVarError::Uninitialized),
+            // We have come into the possesion of an uninitialized OnceCell through spectacular means.
+            false => Err(OnceCellError::Uninitialized),
             true => {
                 self.0.recv_wg.wait();
 
                 // TODO: Bubble up poison err.
                 match self.0.val.lock() {
-                    Err(_) => Err(IVarError::PosionValueGuard),
+                    Err(_) => Err(OnceCellError::PosionValueGuard),
                     Ok(x) => Ok(x.clone()),
                 }
             }
         }
     }
 
-    // Since we have relaxed Pi Calculus' rendezvous requirement, IVar allow sampling.
+    // Since we have relaxed Pi Calculus' rendezvous requirement, OnceCell allow sampling.
     // Like recieve, but non-blocking. Instead immediately returns a tuple
     // The first element is a bool indicating if send has occured, and the second element is
     // Either a clone of the Arc<Mutex<Option<TargetValue>>>, or a wrapper around a none.
-    pub fn sample(&self) -> Result<(bool, IVal<T>), IVarError> {
+    pub fn sample(&self) -> Result<(bool, OnceVal<T>), OnceCellError> {
         match self.check_init() {
-            // We have come into the possession of an uninitialized IVar through spectacular means.
-            false => Err(IVarError::Uninitialized),
+            // We have come into the possession of an uninitialized OnceCell through spectacular means.
+            false => Err(OnceCellError::Uninitialized),
             _ => {
                 // Check if used and block other recvers.
                 let res1 = self.0.send_guard.lock();
                 match res1 {
                     // TODO: Bubble up err
-                    Err(_) => Err(IVarError::PosionWriteGuard),
+                    Err(_) => Err(OnceCellError::PosionWriteGuard),
                     Ok(is_complete) => match *is_complete {
-                        false => Ok((false, IVal::<T>::new(Arc::new(RwLock::new(None))))),
+                        false => Ok((false, OnceVal::<T>::new(Arc::new(RwLock::new(None))))),
                         _ => {
                             // We might be right alongside the sender.
                             // In practice, should not block.
                             self.0.recv_wg.wait();
                             match self.0.val.lock() {
                                 // TODO: Bubble up err
-                                Err(_) => Err(IVarError::PosionValueGuard),
+                                Err(_) => Err(OnceCellError::PosionValueGuard),
                                 Ok(x) => Ok((true, x.clone())),
                             }
                         }
@@ -286,7 +286,7 @@ impl<T: PartialEq> IVar<T> {
 // TODO: BUBBLE UP LOCK ERRS:
 
 #[derive(Debug)]
-pub enum IVarError {
+pub enum OnceCellError {
     PosionWriteLock,
     PosionWriteGuard,
     PosionValueGuard,
@@ -294,26 +294,26 @@ pub enum IVarError {
     ValueMismatch,
 }
 
-impl fmt::Display for IVarError {
+impl fmt::Display for OnceCellError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            IVarError::PosionWriteLock => write!(f, "Impossible poisoned write lock, this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz"),
-            IVarError::PosionWriteGuard => write!(f, "A thread has panicked while holding the IVar's write guard, this cell is now inaccessible this error is likely from a healthy thread, this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz"),
-            IVarError::PosionValueGuard => write!(f, "Some other operation has panicked while holding the IVars value guard, this cell is now inaccessible this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz"),
-            IVarError::ValueMismatch => write!(f, "IVar recieved differing values on write, only one value may be written to a give IVar"),
-            IVarError::Uninitialized => write!(f, "IVar must be initialized to use safely"),
+            OnceCellError::PosionWriteLock => write!(f, "Impossible poisoned write lock, this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz"),
+            OnceCellError::PosionWriteGuard => write!(f, "A thread has panicked while holding the OnceCell's write guard, this cell is now inaccessible this error is likely from a healthy thread, this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz"),
+            OnceCellError::PosionValueGuard => write!(f, "Some other operation has panicked while holding the OnceCells value guard, this cell is now inaccessible this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz"),
+            OnceCellError::ValueMismatch => write!(f, "OnceCell recieved differing values on write, only one value may be written to a give OnceCell"),
+            OnceCellError::Uninitialized => write!(f, "OnceCell must be initialized to use safely"),
         }
     }
 }
 
-impl Error for IVarError {
+impl Error for OnceCellError {
     fn description(&self) -> &str {
         match self {
-            IVarError::PosionWriteLock =>  "Impossible poisoned write lock, this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz",
-            IVarError::PosionWriteGuard => "A thread has panicked while holding the IVar's write guard, this cell is now inaccessible, this error is likely from a healthy thread, this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz",
-            IVarError::PosionValueGuard => "Some other operation has panicked while holding the IVars value guard, this cell is now inaccessible this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz",
-            IVarError::ValueMismatch => "IVar recieved differing values on write, only one value may be written to a give IVar",
-            IVarError::Uninitialized => "IVar must be initialized to use safely",
+            OnceCellError::PosionWriteLock =>  "Impossible poisoned write lock, this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz",
+            OnceCellError::PosionWriteGuard => "A thread has panicked while holding the OnceCell's write guard, this cell is now inaccessible, this error is likely from a healthy thread, this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz",
+            OnceCellError::PosionValueGuard => "Some other operation has panicked while holding the OnceCells value guard, this cell is now inaccessible this is should NEVER HAPPEN, PLEASE FILE A BUG REPORT: github krhoda quartz",
+            OnceCellError::ValueMismatch => "OnceCell recieved differing values on write, only one value may be written to a give OnceCell",
+            OnceCellError::Uninitialized => "OnceCell must be initialized to use safely",
         }
     }
 
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn test_i_var() {
-        let mut p1 = IVar::<usize>::new();
+        let mut p1 = OnceCell::<usize>::new();
         let q1 = p1.clone();
         let (intresting, _) = p1.sample().unwrap();
         match intresting {
@@ -339,7 +339,7 @@ mod tests {
 
         let open_state = p1.state();
         match open_state {
-            IVarState::Empty => println!(""),
+            OnceCellState::Empty => println!(""),
             _ => println!("Unexpected state in open p1!"),
         };
 
@@ -355,7 +355,7 @@ mod tests {
 
             let filled_state = q1.state();
             match filled_state {
-                IVarState::Filled => println!(""),
+                OnceCellState::Filled => println!(""),
                 _ => panic!("Unexpected state in complete q1"),
             };
 
@@ -399,8 +399,8 @@ mod tests {
 
     #[test]
     fn test_nested_i_var() {
-        let mut p1 = IVar::<usize>::new();
-        let mut p2 = IVar::<IVar<usize>>::new();
+        let mut p1 = OnceCell::<usize>::new();
+        let mut p2 = OnceCell::<OnceCell<usize>>::new();
         let q2 = p2.clone();
 
         let h = thread::spawn(move || {
@@ -423,14 +423,14 @@ mod tests {
         p2.write(p1).unwrap();
 
         h.join()
-            .expect("Failed to join threads in nested IVar test")
+            .expect("Failed to join threads in nested OnceCell test")
     }
 
     #[test]
     fn test_i_var_partial_eq() {
-        let mut p1 = IVar::<usize>::new();
-        let mut p2 = IVar::<usize>::new();
-        let mut p3 = IVar::<usize>::new();
+        let mut p1 = OnceCell::<usize>::new();
+        let mut p2 = OnceCell::<usize>::new();
+        let mut p3 = OnceCell::<usize>::new();
 
         assert_eq!(p1, p2);
         assert_eq!(p1, p3);

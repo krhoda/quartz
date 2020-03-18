@@ -12,30 +12,29 @@ use std::sync::{Arc, Barrier, Mutex};
 
 // This is a single-use rendezvous channel, obeying the laws of Pi Calculus.
 #[derive(Clone)]
-pub struct PiChan<T>(Arc<PiMachine<T>>);
+pub struct Ping<T>(Arc<PingMachine<T>>);
 
 #[derive(Debug)]
-pub enum PiChanState {
+pub enum PingState {
     Unintialized, // Shouldn't happen, but who knows what someone will do.
     Open,         // Neither Send or Recieve is Used.
     AwaitSend,    // A listener is waiting.
     AwaitRecv,    // A sender is waiting.
     Used,         // A transfer was made.
 }
-
-impl fmt::Display for PiChanState {
+impl fmt::Display for PingState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            PiChanState::Unintialized => write!(f, "Uninitalized (ILLEGAL, USE PiChan::<T>::new)"),
-            PiChanState::Open => write!(f, "Open"),
-            PiChanState::AwaitSend => write!(f, "AwaitSend"),
-            PiChanState::AwaitRecv => write!(f, "AwaitRecv"),
-            PiChanState::Used => write!(f, "Used"),
+            PingState::Unintialized => write!(f, "Uninitalized (ILLEGAL, USE Ping::<T>::new)"),
+            PingState::Open => write!(f, "Open"),
+            PingState::AwaitSend => write!(f, "AwaitSend"),
+            PingState::AwaitRecv => write!(f, "AwaitRecv"),
+            PingState::Used => write!(f, "Used"),
         }
     }
 }
 
-struct PiMachine<T> {
+struct PingMachine<T> {
     init: Arc<Mutex<bool>>,
     val: Arc<Mutex<Option<T>>>,
     send_guard: Arc<Mutex<bool>>,
@@ -44,8 +43,8 @@ struct PiMachine<T> {
     recv_bar: Arc<Barrier>,
 }
 
-impl<T> PiChan<T> {
-    pub fn new() -> PiChan<T> {
+impl<T> Ping<T> {
+    pub fn new() -> Ping<T> {
         let send_barrier = Arc::new(Barrier::new(2));
         let recv_barrier = Arc::new(Barrier::new(2));
         // Each thread will decrement each barrier once.
@@ -58,7 +57,7 @@ impl<T> PiChan<T> {
         // If this were not rendezvous or were long lived
         // WaitGroups would be needed to "lock the door" behind you.
 
-        PiChan::<T>(Arc::new(PiMachine::<T> {
+        Ping::<T>(Arc::new(PingMachine::<T> {
             init: Arc::new(Mutex::new(true)),
             val: Arc::new(Mutex::new(None)),
             send_guard: Arc::new(Mutex::new(false)),
@@ -68,26 +67,26 @@ impl<T> PiChan<T> {
         }))
     }
 
-    pub fn state(&self) -> PiChanState {
+    pub fn state(&self) -> PingState {
         match self.check_init() {
-            false => PiChanState::Unintialized,
+            false => PingState::Unintialized,
             _ => match self.check_send_used() {
                 true => match self.check_recv_used() {
-                    true => PiChanState::Used,
-                    _ => PiChanState::AwaitRecv,
+                    true => PingState::Used,
+                    _ => PingState::AwaitRecv,
                 },
                 _ => match self.check_recv_used() {
-                    true => PiChanState::AwaitSend,
-                    _ => PiChanState::Open,
+                    true => PingState::AwaitSend,
+                    _ => PingState::Open,
                 },
             },
         }
     }
 
-    pub fn send(&mut self, t: T) -> Result<(), PiChanError> {
+    pub fn send(&mut self, t: T) -> Result<(), PingError> {
         match self.check_init() {
             // We have come into the possession of an uninitialized channel through spectacular means.
-            false => Err(PiChanError::UninitializedChanError),
+            false => Err(PingError::UninitializedChanError),
             true => {
                 let r = self.set_send_used();
 
@@ -115,10 +114,10 @@ impl<T> PiChan<T> {
         }
     }
 
-    pub fn recv(&mut self) -> Result<Option<T>, PiChanError> {
+    pub fn recv(&mut self) -> Result<Option<T>, PingError> {
         match self.check_init() {
             // We have come into the possession of an uninitialized channel through spectacular means.
-            false => Err(PiChanError::UninitializedChanError),
+            false => Err(PingError::UninitializedChanError),
             true => {
                 let r = self.set_recv_used();
                 match r {
@@ -138,11 +137,11 @@ impl<T> PiChan<T> {
         }
     }
 
-    fn set_send_used(&mut self) -> Result<(), PiChanError> {
+    fn set_send_used(&mut self) -> Result<(), PingError> {
         let mut is_used = self.0.send_guard.lock().unwrap();
 
         match *is_used {
-            true => Err(PiChanError::UsedSendChanError),
+            true => Err(PingError::UsedSendChanError),
             false => {
                 *is_used = true;
                 Ok(())
@@ -150,11 +149,11 @@ impl<T> PiChan<T> {
         }
     }
 
-    fn set_recv_used(&mut self) -> Result<(), PiChanError> {
+    fn set_recv_used(&mut self) -> Result<(), PingError> {
         let mut is_used = self.0.recv_guard.lock().unwrap();
 
         match *is_used {
-            true => Err(PiChanError::UsedRecvChanError),
+            true => Err(PingError::UsedRecvChanError),
             false => {
                 *is_used = true;
                 Ok(())
@@ -176,34 +175,34 @@ impl<T> PiChan<T> {
 }
 
 #[derive(Debug)]
-pub enum PiChanError {
+pub enum PingError {
     UsedSendChanError,
     UsedRecvChanError,
     UninitializedChanError,
 }
 
-impl fmt::Display for PiChanError {
+impl fmt::Display for PingError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            PiChanError::UsedSendChanError => {
-                write!(f, "This instance of PiChan already has a sender")
+            PingError::UsedSendChanError => {
+                write!(f, "This instance of Ping already has a sender")
             }
-            PiChanError::UsedRecvChanError => {
-                write!(f, "This instance of PiChan already has a reciever")
+            PingError::UsedRecvChanError => {
+                write!(f, "This instance of Ping already has a reciever")
             }
-            PiChanError::UninitializedChanError => {
-                write!(f, "PiChan must be initialized to use safely")
+            PingError::UninitializedChanError => {
+                write!(f, "Ping must be initialized to use safely")
             }
         }
     }
 }
 
-impl Error for PiChanError {
+impl Error for PingError {
     fn description(&self) -> &str {
         match self {
-            PiChanError::UsedSendChanError => "This instance of PiChan already has a sender",
-            PiChanError::UsedRecvChanError => "This instance of PiChan already has a reciever",
-            PiChanError::UninitializedChanError => "PiChan must be initialized to use safely",
+            PingError::UsedSendChanError => "This instance of Ping already has a sender",
+            PingError::UsedRecvChanError => "This instance of Ping already has a reciever",
+            PingError::UninitializedChanError => "Ping must be initialized to use safely",
         }
     }
 
@@ -219,23 +218,23 @@ mod tests {
 
     #[test]
     fn test_pi_chan() {
-        let mut p1 = PiChan::<bool>::new();
+        let mut p1 = Ping::<bool>::new();
         let mut q1 = p1.clone();
 
         let un_init = p1.state();
         match un_init {
-            PiChanState::Open => println!(""),
+            PingState::Open => println!(""),
             _ => panic!("P1 was in unexpected state! {}", un_init),
         };
 
-        let mut p2 = PiChan::<bool>::new();
+        let mut p2 = Ping::<bool>::new();
         let mut q2 = p2.clone();
 
         let h = thread::spawn(move || {
             let non_determ = q1.state();
             match non_determ {
-                PiChanState::Open => println!("Q1 is open, we are ahead of the main thread"),
-                PiChanState::AwaitRecv => {
+                PingState::Open => println!("Q1 is open, we are ahead of the main thread"),
+                PingState::AwaitRecv => {
                     println!("Q1 is awaiting a reciever, we are behind the main thread")
                 }
                 _ => panic!("Q1 is in an unexpected state!, {}", non_determ),
@@ -253,14 +252,14 @@ mod tests {
 
             let used = q1.state();
             match used {
-                PiChanState::Used => println!("Q1 is used as expected"),
+                PingState::Used => println!("Q1 is used as expected"),
                 _ => panic!("Q1 was in unexpected state! {}", used),
             };
 
             let non_determ = q2.state();
             match non_determ {
-                PiChanState::Open => println!("Q2 is open, we are ahead of the main thread"),
-                PiChanState::AwaitSend => {
+                PingState::Open => println!("Q2 is open, we are ahead of the main thread"),
+                PingState::AwaitSend => {
                     println!("Q2 is awaiting a sender, we are behind the main thread")
                 }
                 _ => panic!("Q2 is in an unexpected state!, {}", non_determ),
@@ -270,7 +269,7 @@ mod tests {
 
             let used = q2.state();
             match used {
-                PiChanState::Used => println!("Q2 is used as expected"),
+                PingState::Used => println!("Q2 is used as expected"),
                 _ => panic!("Q2 was in unexpected state! {}", used),
             };
         });

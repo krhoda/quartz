@@ -1,5 +1,5 @@
 [package]
-name = "pi_chan"
+name = "ping"
 version = "0.1.0"
 authors = ["K Rhoda <kelseydrhoda@gmail.com>"]
 edition = "2018"

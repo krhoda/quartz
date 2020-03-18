@@ -2,8 +2,7 @@
 
 members = [
 	"spark",
-	"pi_chan",
-	"prop_cell",
-	"i_var",
+	"ping",
+	"once_cell",
 	"wait_group",
 ]
