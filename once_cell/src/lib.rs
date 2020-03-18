@@ -1,15 +1,13 @@
 use std::cmp::PartialEq;
 use std::error::Error;
 use std::fmt;
-use std::sync::{Arc, LockResult, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, LockResult, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use wait_group::WaitGroup;
 
 // TODOS:
-// 1 -- check_init / check_send_guard need to return errs 
-// 2 -- Poison errs need to bubble
-// 3 -- hide the None -> Option<T> transformation, since it cannot be None.
-// 4 -- Add ImpossibleState err to support above.
-    
+// 1 -- Poison errs need to bubble
+// 2 -- hide the None -> Option<T> transformation, since it cannot be None.
+// 3 -- Add ImpossibleState err to support above.
 
 // Functions as a Multi-Writer, Single-Value, Multi-Consumer channel.
 // No redezvous.
@@ -106,7 +104,9 @@ pub enum OnceCellState {
 impl fmt::Display for OnceCellState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            OnceCellState::Unintialized => write!(f, "Uninitalized (ILLEGAL, USE OnceCell::<T>::new)"),
+            OnceCellState::Unintialized => {
+                write!(f, "Uninitalized (ILLEGAL, USE OnceCell::<T>::new)")
+            }
             OnceCellState::Empty => write!(f, "Empty"),
             OnceCellState::Filled => write!(f, "Filled"),
         }
@@ -146,12 +146,20 @@ impl<T: PartialEq> OnceCell<T> {
     }
 
     // Check the state of a given OnceCell
-    pub fn state(&self) -> OnceCellState {
+    pub fn state(&self) -> Result<OnceCellState, OnceCellError> {
         match self.check_init() {
-            false => OnceCellState::Unintialized,
-            _ => match self.check_send_used() {
-                false => OnceCellState::Empty,
-                _ => OnceCellState::Filled,
+            // TODO: Bubble err here!
+            Err(_) => Err(OnceCellError::Uninitialized),
+            Ok(x) => match *x {
+                false => Ok(OnceCellState::Unintialized),
+                _ => match self.check_send_used() {
+                    // TODO: Bubble err here!
+                    Err(_) => Err(OnceCellError::PosionWriteGuard),
+                    Ok(x) => match *x {
+                        false => Ok(OnceCellState::Empty),
+                        _ => Ok(OnceCellState::Filled),
+                    },
+                },
             },
         }
     }
@@ -161,65 +169,68 @@ impl<T: PartialEq> OnceCell<T> {
     // nor matches the existing value, an error is raised.
     pub fn write(&mut self, t: T) -> Result<(), OnceCellError> {
         match self.check_init() {
-            // We have come into the possession of an uninitialized OnceCell through spectacular means.
-            false => Err(OnceCellError::Uninitialized),
+            // TODO: Bubble here!
+            Err(_) => Err(OnceCellError::Uninitialized),
+            Ok(x) => match *x {
+                false => Err(OnceCellError::Uninitialized),
 
-            true => {
-                let res1 = self.0.send_guard.lock();
-                match res1 {
-                    // TODO: Bubble up poison err:
-                    Err(_) => Err(OnceCellError::PosionWriteGuard),
-
-                    // If the first lock works, check the second.
-                    Ok(mut is_used) => match self.0.val.lock() {
+                true => {
+                    let res1 = self.0.send_guard.lock();
+                    match res1 {
                         // TODO: Bubble up poison err:
-                        Err(_) => Err(OnceCellError::PosionValueGuard),
+                        Err(_) => Err(OnceCellError::PosionWriteGuard),
 
-                        // Assuming all locks are good, and they should be
-                        // Either write or compare.
-                        Ok(mut wrapper) => match *is_used {
-                            true => {
-                                // NO BLOCKING!
-                                let data = wrapper.read();
-                                match &*data {
-                                    Some(x) => match &t == x {
-                                        true => Ok(()),
-                                        _ => Err(OnceCellError::ValueMismatch),
-                                    },
+                        // If the first lock works, check the second.
+                        Ok(mut is_used) => match self.0.val.lock() {
+                            // TODO: Bubble up poison err:
+                            Err(_) => Err(OnceCellError::PosionValueGuard),
 
-                                    // This would only trip in the frightening
-                                    // "Someone panics holding the write lock" situation.
-                                    // This could result in a deadlock, but interestingly is detectable.
-                                    // (&*data == None && *is_used) = deadlock_for_readers.
-                                    // This could be transmitted to the recievers and they return with a (documented) error.
-                                    // Not implementing because I'm not convinced anyone could panic holding the write lock
-                                    // Short of hardware failure.
-                                    // Leaving this comment because I could very well be wrong.
-                                    None => Err(OnceCellError::ValueMismatch),
-                                }
-                            }
-                            false => {
-                                // prevents any futher use of the write lock.
-                                // note, we do this before checking the write lock,
-                                // prefering a detectable deadlock to runtime panic.
-                                *is_used = true;
+                            // Assuming all locks are good, and they should be
+                            // Either write or compare.
+                            Ok(mut wrapper) => match *is_used {
+                                true => {
+                                    // NO BLOCKING!
+                                    let data = wrapper.read();
+                                    match &*data {
+                                        Some(x) => match &t == x {
+                                            true => Ok(()),
+                                            _ => Err(OnceCellError::ValueMismatch),
+                                        },
 
-                                // the only use of the write lock.
-                                let res1 = wrapper.write();
-                                match res1 {
-                                    // TODO: PASS THE WRITE LOCK ERR AS SOURCE.
-                                    Err(_) => Err(OnceCellError::PosionWriteLock),
-                                    Ok(mut data) => {
-                                        *data = Some(t);
-                                        self.0.recv_wg.done();
-                                        Ok(())
+                                        // This would only trip in the frightening
+                                        // "Someone panics holding the write lock" situation.
+                                        // This could result in a deadlock, but interestingly is detectable.
+                                        // (&*data == None && *is_used) = deadlock_for_readers.
+                                        // This could be transmitted to the recievers and they return with a (documented) error.
+                                        // Not implementing because I'm not convinced anyone could panic holding the write lock
+                                        // Short of hardware failure.
+                                        // Leaving this comment because I could very well be wrong.
+                                        None => Err(OnceCellError::ValueMismatch),
                                     }
                                 }
-                            }
+                                false => {
+                                    // prevents any futher use of the write lock.
+                                    // note, we do this before checking the write lock,
+                                    // prefering a detectable deadlock to runtime panic.
+                                    *is_used = true;
+
+                                    // the only use of the write lock.
+                                    let res1 = wrapper.write();
+                                    match res1 {
+                                        // TODO: PASS THE WRITE LOCK ERR AS SOURCE.
+                                        Err(_) => Err(OnceCellError::PosionWriteLock),
+                                        Ok(mut data) => {
+                                            *data = Some(t);
+                                            self.0.recv_wg.done();
+                                            Ok(())
+                                        }
+                                    }
+                                }
+                            },
                         },
-                    },
+                    }
                 }
-            }
+            }, // We have come into the possession of an uninitialized OnceCell through spectacular means.
         }
     }
 
@@ -228,16 +239,20 @@ impl<T: PartialEq> OnceCell<T> {
     pub fn read(&self) -> Result<OnceVal<T>, OnceCellError> {
         match self.check_init() {
             // We have come into the possesion of an uninitialized OnceCell through spectacular means.
-            false => Err(OnceCellError::Uninitialized),
-            true => {
-                self.0.recv_wg.wait();
+            // TODO: Bubble up
+            Err(_) => Err(OnceCellError::Uninitialized),
+            Ok(x) => match *x {
+                false => Err(OnceCellError::Uninitialized),
+                true => {
+                    self.0.recv_wg.wait();
 
-                // TODO: Bubble up poison err.
-                match self.0.val.lock() {
-                    Err(_) => Err(OnceCellError::PosionValueGuard),
-                    Ok(x) => Ok(x.clone()),
+                    // TODO: Bubble up poison err.
+                    match self.0.val.lock() {
+                        Err(_) => Err(OnceCellError::PosionValueGuard),
+                        Ok(x) => Ok(x.clone()),
+                    }
                 }
-            }
+            },
         }
     }
 
@@ -248,38 +263,40 @@ impl<T: PartialEq> OnceCell<T> {
     pub fn sample(&self) -> Result<(bool, OnceVal<T>), OnceCellError> {
         match self.check_init() {
             // We have come into the possession of an uninitialized OnceCell through spectacular means.
-            false => Err(OnceCellError::Uninitialized),
-            _ => {
-                // Check if used and block other recvers.
-                let res1 = self.0.send_guard.lock();
-                match res1 {
-                    // TODO: Bubble up err
-                    Err(_) => Err(OnceCellError::PosionWriteGuard),
-                    Ok(is_complete) => match *is_complete {
-                        false => Ok((false, OnceVal::<T>::new(Arc::new(RwLock::new(None))))),
-                        _ => {
-                            // We might be right alongside the sender.
-                            // In practice, should not block.
-                            self.0.recv_wg.wait();
-                            match self.0.val.lock() {
-                                // TODO: Bubble up err
-                                Err(_) => Err(OnceCellError::PosionValueGuard),
-                                Ok(x) => Ok((true, x.clone())),
+            // TODO: Bubble err here
+            Err(_) => Err(OnceCellError::Uninitialized),
+            Ok(x) => match *x {
+                false => Err(OnceCellError::Uninitialized),
+                _ => {
+                    // Check if used and block other recvers.
+                    let res1 = self.0.send_guard.lock();
+                    match res1 {
+                        // TODO: Bubble up err
+                        Err(_) => Err(OnceCellError::PosionWriteGuard),
+                        Ok(is_complete) => match *is_complete {
+                            false => Ok((false, OnceVal::<T>::new(Arc::new(RwLock::new(None))))),
+                            _ => {
+                                // We might be right alongside the sender.
+                                // In practice, should not block.
+                                self.0.recv_wg.wait();
+                                match self.0.val.lock() {
+                                    // TODO: Bubble up err
+                                    Err(_) => Err(OnceCellError::PosionValueGuard),
+                                    Ok(x) => Ok((true, x.clone())),
+                                }
                             }
-                        }
-                    },
+                        },
+                    }
                 }
-            }
+            },
         }
     }
 
-    // TODO: CHECK THESE UNWRAPS:
-    fn check_send_used(&self) -> bool {
-        *self.0.send_guard.lock().unwrap()
+    fn check_send_used(&self) -> LockResult<MutexGuard<'_, bool>> {
+        self.0.send_guard.lock()
     }
-
-    fn check_init(&self) -> bool {
-        *self.0.init.lock().unwrap()
+    fn check_init(&self) -> LockResult<MutexGuard<'_, bool>> {
+        self.0.init.lock()
     }
 }
 
@@ -338,7 +355,7 @@ mod tests {
         };
 
         let open_state = p1.state();
-        match open_state {
+        match open_state.unwrap() {
             OnceCellState::Empty => println!(""),
             _ => println!("Unexpected state in open p1!"),
         };
@@ -353,7 +370,7 @@ mod tests {
                 },
             };
 
-            let filled_state = q1.state();
+            let filled_state = q1.state().unwrap();
             match filled_state {
                 OnceCellState::Filled => println!(""),
                 _ => panic!("Unexpected state in complete q1"),
