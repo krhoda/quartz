@@ -8,7 +8,7 @@ As it stands, it is a set of a la carte thread-safe communication mechanisms/val
 
 It is currently a work-in-progress and much is left to be achieved.
 
-Learning from the dangers of naming concepts `Monads`, we're going to give these structures names relevant to their usage in day to day computing, but we're also going to outline their mathematical/research heritage. The reason for this isn't trivia, but a formal proof of why these structures should have worthwhile properties, such as being impossible to leak or deadlock free. Additionally, by declaring these structures in concrete, practical, and mathematical terms, we avoid the confusion that ill-defined terms have caused, such as the exact distinction of (actor or channels)[https://core.ac.uk/download/pdf/84869002.pdf]. Questions of bug or feature become easier to navigate as well.
+Learning from the dangers of naming concepts `Monads`, we're going to give these structures names relevant to their usage in day to day computing, but we're also going to outline their mathematical/research heritage. The reason for this isn't trivia, but a formal proof of why these structures should have worthwhile properties, such as being impossible to leak or deadlock free. Additionally, by declaring these structures in concrete, practical, and mathematical terms, we avoid the confusion that ill-defined terms have caused, such as the exact distinction of [actor or channels](https://core.ac.uk/download/pdf/84869002.pdf). Questions of bug or feature become easier to navigate as well.
 
 ### TODO REFACTOR THE LIBS TO MEET THIS NEW DOCUMENTATION.
 
