@@ -1,7 +1,6 @@
 [workspace]
 
 members = [
-	"spark",
 	"ping",
 	"once_cell",
 	"wait_group",

@@ -1,7 +1,6 @@
 use std::error::Error;
 use std::fmt;
 use std::sync::{Arc, Barrier, Mutex};
-
 // TODO:
 // 1 -- Hide the Option<T> implementation from the end user
 // 2 -- Add ImpossibleState error to support the above
@@ -184,9 +183,7 @@ pub enum PingError {
 impl fmt::Display for PingError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            PingError::UsedSendChanError => {
-                write!(f, "This instance of Ping already has a sender")
-            }
+            PingError::UsedSendChanError => write!(f, "This instance of Ping already has a sender"),
             PingError::UsedRecvChanError => {
                 write!(f, "This instance of Ping already has a reciever")
             }
@@ -211,13 +208,32 @@ impl Error for PingError {
     }
 }
 
+// TODO: Figure out how to make this work without leaking memory everywhere like 'static does now.
+pub fn spark<T: 'static, U: 'static>(arg: T, action: Box<dyn FnOnce(T) -> U + Send>) -> Ping<U>
+where
+    T: Send,
+    U: Send + Clone,
+{
+    let p = Ping::<U>::new();
+    let mut q = p.clone();
+    let f = move || {
+        let x = action(arg);
+        q.send(x);
+        println!("hello spark")
+    };
+
+    std::thread::spawn(f);
+
+    p
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::thread;
 
     #[test]
-    fn test_pi_chan() {
+    fn test_ping() {
         let mut p1 = Ping::<bool>::new();
         let mut q1 = p1.clone();
 
@@ -290,13 +306,27 @@ mod tests {
         let err1 = p1.send(true);
         match err1 {
             Err(_) => println!(""),
-            Ok(_) => panic!("Send allowed on closed channel")
+            Ok(_) => panic!("Send allowed on closed channel"),
         }
 
         let err2 = p2.recv();
         match err2 {
             Err(_) => println!(""),
-            Ok(_) => panic!("Recv allowed on closed channel")
+            Ok(_) => panic!("Recv allowed on closed channel"),
         }
+    }
+
+    #[test]
+    fn test_spark(){
+        let f = |i: i32| i * i;
+        let mut my_spark = spark(4, Box::new(f));
+        let result = my_spark.recv().unwrap();
+        match result {
+            Some(x) => {
+                assert_eq!(16, x)
+            }
+            _ => panic!("No result")
+        }
+        
     }
 }

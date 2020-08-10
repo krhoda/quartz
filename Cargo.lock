@@ -12,13 +12,6 @@ name = "ping"
 version = "0.1.0"
 
 [[package]]
-name = "spark"
-version = "0.1.0"
-dependencies = [
- "ping 0.1.0",
-]
-
-[[package]]
 name = "wait_group"
 version = "0.1.0"
 
