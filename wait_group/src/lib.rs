@@ -6,8 +6,14 @@ use std::sync::{Arc, Condvar, Mutex};
 
 // Tests are my addition.
 
-#[derive(Clone)]
 pub struct WaitGroup(Arc<WaitGroupInner>);
+
+// Manual implement this cause I stopped trusting derive.
+impl Clone for WaitGroup {
+    fn clone(&self) -> WaitGroup {
+        WaitGroup(self.0.clone())
+    }
+}
 
 struct WaitGroupInner {
     cond: Condvar,

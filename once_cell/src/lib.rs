@@ -18,10 +18,16 @@ use wait_group::WaitGroup;
 // (false, Arc<Mutex<None>>) before the write event and
 // (true, Arc<Mutex<Some<TargetValue>>>) after the write event
 // It is best to think of this as a future that was run (at least) once then cached.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct OnceCell<T>(Arc<OnceCellMachine<T>>)
 where
     T: PartialEq;
+
+impl<T: PartialEq> Clone for OnceCell<T> {
+    fn clone(&self) -> OnceCell<T> {
+        OnceCell::<T>(self.0.clone())
+    }
+}
 
 impl<T: PartialEq> PartialEq for OnceCell<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -61,10 +67,16 @@ impl<T: PartialEq> PartialEq for OnceCell<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct OnceVal<T>(Arc<RwLock<Option<T>>>)
 where
     T: PartialEq;
+
+impl<T: PartialEq> Clone for OnceVal<T> {
+    fn clone(&self) -> OnceVal<T> {
+        OnceVal::<T>(Arc::clone(&self.0))
+    }
+}
 
 // The read half of a RWLock who's write half is now inaccessible making it essetially lock free and threadsafe.
 impl<T: PartialEq> OnceVal<T> {
@@ -73,10 +85,6 @@ impl<T: PartialEq> OnceVal<T> {
         // Panicking while holding the write lock would mean never writing a variable.
         // The OnceVal could not be read without the lock being "unpoisonable"
         self.0.read().unwrap()
-    }
-
-    pub fn clone(&self) -> OnceVal<T> {
-        OnceVal::<T>(Arc::clone(&self.0))
     }
 
     fn write(&mut self) -> LockResult<RwLockWriteGuard<'_, Option<T>>> {
@@ -301,7 +309,6 @@ impl<T: PartialEq> OnceCell<T> {
 }
 
 // TODO: BUBBLE UP LOCK ERRS:
-
 #[derive(Debug)]
 pub enum OnceCellError {
     PosionWriteLock,

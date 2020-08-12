@@ -2,16 +2,19 @@ use std::error::Error;
 use std::fmt;
 use std::sync::{Arc, Barrier, Mutex};
 // TODO:
-// 1 -- Hide the Option<T> implementation from the end user
-// 2 -- Add ImpossibleState error to support the above
-// 3 -- Add PoisonErrs similar to IVar
+// Add PoisonErrs similar to IVar
 
 // CONSIDER FOR DEADLOCK FREEDOM:
 // Breaking into sender + reciever, killing a wait if the other drops from exisitence.
 
 // This is a single-use rendezvous channel, obeying the laws of Pi Calculus.
-#[derive(Clone)]
 pub struct Ping<T>(Arc<PingMachine<T>>);
+
+impl<T> Clone for Ping<T> {
+    fn clone(&self) -> Ping<T> {
+        Ping::<T>(self.0.clone())
+    }
+}
 
 #[derive(Debug)]
 pub enum PingState {
@@ -21,6 +24,7 @@ pub enum PingState {
     AwaitRecv,    // A sender is waiting.
     Used,         // A transfer was made.
 }
+
 impl fmt::Display for PingState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -113,7 +117,7 @@ impl<T> Ping<T> {
         }
     }
 
-    pub fn recv(&mut self) -> Result<Option<T>, PingError> {
+    pub fn recv(&mut self) -> Result<T, PingError> {
         match self.check_init() {
             // We have come into the possession of an uninitialized channel through spectacular means.
             false => Err(PingError::UninitializedChanError),
@@ -126,10 +130,7 @@ impl<T> Ping<T> {
 
                         self.0.send_bar.wait(); // Await the sender.
 
-                        // Weaken references to self?
-                        Ok(self.0.val.lock().unwrap().take())
-                        // If so, one here after assigning take.
-                        // Then return the assigned take.
+                        Ok(self.0.val.lock().unwrap().take().unwrap())
                     }
                 }
             }
@@ -208,23 +209,34 @@ impl Error for PingError {
     }
 }
 
-// TODO: Figure out how to make this work without leaking memory everywhere like 'static does now.
-pub fn spark<T: 'static, U: 'static>(arg: T, action: Box<dyn FnOnce(T) -> U + Send>) -> Ping<U>
+pub struct Spark<T> (Ping<T>);
+impl<T> Spark<T> {
+    pub fn read(&mut self) -> Result<T, PingError> {
+        self.0.recv()
+    }
+}
+
+pub fn spark<T: 'static, U: 'static>(arg: T, action: Box<dyn FnOnce(T) -> U + Send>) -> Spark<U>
 where
     T: Send,
-    U: Send + Clone,
+    U: Send,
 {
     let p = Ping::<U>::new();
     let mut q = p.clone();
     let f = move || {
         let x = action(arg);
-        q.send(x);
-        println!("hello spark")
+        let r = q.send(x);
+        match r {
+            Ok(_) => {},
+            Err(err) => {
+                println!("Impossible state in spark! Err in interal send {}", err)
+            }
+        }
     };
 
     std::thread::spawn(f);
 
-    p
+    Spark::<U>(p)
 }
 
 #[cfg(test)]
@@ -256,13 +268,13 @@ mod tests {
                 _ => panic!("Q1 is in an unexpected state!, {}", non_determ),
             };
 
-            let q1_result = q1.recv().expect("Used Chan Err Heard");
+            let q1_result = q1.recv();
             match q1_result {
-                Some(y) => {
+                Ok(y) => {
                     assert!(y);
                 }
-                None => {
-                    panic!("Thread 2: Heard Err Listening to c1");
+                Err(err) => {
+                    panic!("Thread 2: Heard Err Listening to c1 {}", err);
                 }
             };
 
@@ -291,13 +303,13 @@ mod tests {
         });
 
         p1.send(true).expect("Send on used channel for p1");
-        let p2_result = p2.recv().expect("Used Chan Err Heard");
+        let p2_result = p2.recv();
         match p2_result {
-            Some(y) => {
+            Ok(y) => {
                 assert!(y);
             }
-            None => {
-                panic!("Thread 2: Heard Err Listening to c1");
+            Err(err) => {
+                panic!("Thread 2: Heard Err Listening to c1 {}", err);
             }
         }
 
@@ -320,13 +332,12 @@ mod tests {
     fn test_spark(){
         let f = |i: i32| i * i;
         let mut my_spark = spark(4, Box::new(f));
-        let result = my_spark.recv().unwrap();
+        let result = my_spark.read();
         match result {
-            Some(x) => {
+            Ok(x) => {
                 assert_eq!(16, x)
             }
             _ => panic!("No result")
         }
-        
     }
 }
