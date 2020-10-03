@@ -226,6 +226,8 @@ where
     let f = move || {
         let x = action(arg);
         let r = q.send(x);
+        // Given that Ping is a rendezvous, this will block until the caller lifts the barriers.
+        // Consider creating non-rendezvous channel and replacing later.
         match r {
             Ok(_) => {},
             Err(err) => {
