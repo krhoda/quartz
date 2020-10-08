@@ -180,10 +180,12 @@ impl<T: PartialEq> OnceCell<T> {
             // TODO: Bubble here!
             Err(_) => Err(OnceCellError::Uninitialized),
             Ok(x) => match *x {
+                // We have come into the possession of an uninitialized OnceCell through spectacular means.// We have come into the possession of an uninitialized OnceCell through spectacular means.
                 false => Err(OnceCellError::Uninitialized),
 
                 true => {
                     let res1 = self.0.send_guard.lock();
+
                     match res1 {
                         // TODO: Bubble up poison err:
                         Err(_) => Err(OnceCellError::PosionWriteGuard),
@@ -238,7 +240,7 @@ impl<T: PartialEq> OnceCell<T> {
                         },
                     }
                 }
-            }, // We have come into the possession of an uninitialized OnceCell through spectacular means.
+            }, 
         }
     }
 
