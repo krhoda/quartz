@@ -2,7 +2,7 @@ use std::cmp::PartialEq;
 use std::error::Error;
 use std::fmt;
 use std::sync::{Arc, LockResult, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use wait_group::WaitGroup;
+use crate::wait_group::WaitGroup;
 
 // TODOS:
 // 1 -- Poison errs need to bubble
